@@ -330,8 +330,8 @@
     /* ── Content Grid: Main Cards (Left) + Contacts Column (Right) ── */
     .content-body-grid {
       display: flex;
-      padding: 22px 28px 60px;
-      gap: 22px;
+      padding: 20px 24px 60px;
+      gap: 20px;
       align-items: flex-start;
       max-width: 1540px;
       width: 100%;
@@ -343,7 +343,7 @@
       min-width: 0;
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 16px;
     }
 
     /* ── HERO BANNER & METRICS CARD ── */
@@ -351,24 +351,24 @@
       background: #ffffff;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-lg);
-      padding: 22px 26px 20px;
+      padding: 20px 24px 18px;
       box-shadow: var(--shadow-sm);
       position: relative;
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 18px;
     }
     .hero-mountain-bg {
       position: absolute;
       top: 0;
       right: 0;
-      width: 55%;
+      width: 52%;
       height: 100%;
-      background: url('/hero_mountains.png') no-repeat center right / cover;
+      background: url('/hero_mountains.png') no-repeat top right / cover;
       opacity: 0.88;
-      mask-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.95) 30%, rgba(0,0,0,1) 100%);
-      -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.95) 30%, rgba(0,0,0,1) 100%);
+      mask-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.95) 25%, rgba(0,0,0,1) 100%), linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0) 90%);
+      -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.95) 25%, rgba(0,0,0,1) 100%), linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0) 90%);
       pointer-events: none;
       z-index: 1;
     }
@@ -396,36 +396,37 @@
     /* 5 Metric Summary Cards Grid */
     .metric-cards-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)) minmax(180px, 1.3fr);
-      gap: 10px;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.15fr);
+      gap: 8px;
       position: relative;
       z-index: 2;
+      width: 100%;
     }
     .metric-card {
       background: #ffffff;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-md);
-      padding: 12px 14px;
+      padding: 8px 9px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      gap: 7px;
       box-shadow: var(--shadow-sm);
       transition: transform 0.15s ease, box-shadow 0.15s ease;
       cursor: pointer;
+      min-width: 0;
     }
     .metric-card:hover {
       transform: translateY(-2px);
       box-shadow: var(--shadow-md);
     }
     .metric-icon-box {
-      width: 36px;
-      height: 36px;
-      border-radius: var(--radius-md);
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
+      font-size: 13px;
       flex-shrink: 0;
     }
     .metric-info {
@@ -435,35 +436,40 @@
       min-width: 0;
     }
     .metric-number {
-      font-size: 20px;
+      font-size: 17px;
       font-weight: 800;
       color: #0f172a;
       line-height: 1.1;
       font-family: 'Plus Jakarta Sans', sans-serif;
     }
     .metric-label {
-      font-size: 11px;
+      font-size: 9.5px;
       color: #64748b;
       font-weight: 600;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .metric-arrow {
       color: #94a3b8;
-      font-size: 12px;
+      font-size: 10px;
       font-weight: bold;
+      flex-shrink: 0;
+      margin-left: auto;
     }
 
     .metric-quote-card {
       background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
       border: 1px dashed #cbd5e1;
       border-radius: var(--radius-md);
-      padding: 12px 14px;
+      padding: 7px 9px;
       display: flex;
       align-items: center;
-      font-size: 11.5px;
+      font-size: 10px;
       color: #475569;
       font-style: italic;
-      line-height: 1.35;
+      line-height: 1.3;
+      min-width: 0;
     }
 
     /* ── STEP CARDS ── */
@@ -860,19 +866,19 @@
 
     /* ── RIGHT COLUMN (Contacts / Leads) ── */
     .contacts-sidebar-col {
-      width: 380px;
+      width: 320px;
       flex-shrink: 0;
       background: #ffffff;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-lg);
-      padding: 16px 18px;
+      padding: 14px 14px;
       box-shadow: var(--shadow-sm);
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
       position: sticky;
-      top: 75px;
-      max-height: calc(100vh - 95px);
+      top: 65px;
+      max-height: calc(100vh - 85px);
     }
     @media (max-width: 1150px) {
       .content-body-grid { flex-direction: column-reverse; }
