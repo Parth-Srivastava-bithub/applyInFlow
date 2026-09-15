@@ -6,6 +6,14 @@
   <title>AutoApply — Autonomous Recruiter Outreach Agent</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    (function() {
+      try {
+        const t = localStorage.getItem('autoapply_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch(e) {}
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -55,6 +63,249 @@
       --radius-lg: 14px;
       --radius-md: 10px;
       --radius-sm: 6px;
+    }
+
+    :root[data-theme="dark"] {
+      --bg-app: #0b0f19;
+      --sidebar-bg: #070a11;
+      --sidebar-hover: #172033;
+      --sidebar-active: #2563eb;
+      --sidebar-text: #f8fafc;
+      --sidebar-muted: #94a3b8;
+      
+      --card-bg: #111827;
+      --card-border: #1f293d;
+      --card-border-subtle: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-soft: rgba(37, 99, 235, 0.18);
+      --primary-border: rgba(59, 130, 246, 0.35);
+      
+      --success: #22c55e;
+      --success-soft: rgba(34, 197, 94, 0.16);
+      --success-border: rgba(34, 197, 94, 0.35);
+      --success-text: #4ade80;
+      
+      --warning: #f59e0b;
+      --warning-soft: rgba(245, 158, 11, 0.16);
+      --warning-border: rgba(245, 158, 11, 0.35);
+      --warning-text: #fbbf24;
+      
+      --danger: #ef4444;
+      --danger-soft: rgba(239, 68, 68, 0.16);
+      --danger-border: rgba(239, 68, 68, 0.35);
+      --danger-text: #f87171;
+
+      --purple: #8b5cf6;
+      --purple-soft: rgba(139, 92, 246, 0.18);
+      --purple-border: rgba(139, 92, 246, 0.35);
+      --purple-text: #c4b5fd;
+
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+    }
+
+    /* ── Dark Mode Component Overrides ── */
+    [data-theme="dark"] .top-header {
+      background: #111827;
+      border-bottom-color: #1f2937;
+    }
+    [data-theme="dark"] .global-search-wrap {
+      background: #1e293b;
+      border-color: #334155;
+    }
+    [data-theme="dark"] .global-search-input {
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .kbd-badge {
+      background: #0f172a;
+      border-color: #475569;
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .header-icon-btn {
+      background: #1e293b;
+      border-color: #334155;
+      color: #cbd5e1;
+    }
+    [data-theme="dark"] .header-icon-btn:hover {
+      background: #334155;
+      color: #ffffff;
+    }
+    [data-theme="dark"] .hero-banner-card {
+      background: #111827;
+      border-color: #1f2937;
+    }
+    [data-theme="dark"] .hero-title {
+      color: #ffffff;
+    }
+    [data-theme="dark"] .hero-subtitle {
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .hero-banner-card::before {
+      background: linear-gradient(to right, #111827 0%, #111827 28%, rgba(17,24,39,0.85) 42%, rgba(17,24,39,0.3) 60%, rgba(17,24,39,0) 80%),
+                  linear-gradient(to top, #111827 0%, rgba(17,24,39,0.85) 20%, rgba(17,24,39,0) 55%);
+    }
+    [data-theme="dark"] .metric-card {
+      background: #1e293b;
+      border-color: #334155;
+    }
+    [data-theme="dark"] .metric-number {
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .metric-label {
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .metric-quote-card {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-color: #334155;
+      color: #cbd5e1;
+    }
+    [data-theme="dark"] .step-card {
+      background: #111827;
+      border-color: #1f2937;
+    }
+    [data-theme="dark"] .step-title-row {
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .form-input,
+    [data-theme="dark"] select.select-box {
+      background: #1e293b;
+      border-color: #334155;
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .value-box-pill {
+      background: #1e293b;
+      border-color: #334155;
+    }
+    [data-theme="dark"] .value-box-pill:hover {
+      background: #253349;
+      border-color: #475569;
+    }
+    [data-theme="dark"] .value-num-tag {
+      background: #0f172a;
+      border-color: #334155;
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .value-text-input {
+      color: #f1f5f9;
+    }
+    [data-theme="dark"] .resume-attach-box {
+      background: rgba(22, 163, 74, 0.12);
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+    [data-theme="dark"] .resume-main-name {
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .resume-sub-info {
+      color: #86efac;
+    }
+    [data-theme="dark"] .contacts-sidebar-col {
+      background: #111827;
+      border-color: #1f2937;
+    }
+    [data-theme="dark"] .sidebar-tab-toggle {
+      background: #0f172a;
+    }
+    [data-theme="dark"] .tab-toggle-btn.active#tab-pending {
+      background: #1e293b;
+      color: #60a5fa;
+    }
+    [data-theme="dark"] .tab-toggle-btn.active#tab-sent {
+      background: #1e293b;
+      color: #4ade80;
+    }
+    [data-theme="dark"] .contacts-search-box {
+      background: #1e293b;
+      border-color: #334155;
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .contact-card-item {
+      background: #1e293b;
+      border-color: #334155;
+    }
+    [data-theme="dark"] .contact-card-item:hover {
+      background: #253349;
+      border-color: #475569;
+    }
+    [data-theme="dark"] .contact-name-tag {
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .contact-email-line {
+      background: #0f172a;
+      border-color: #334155;
+    }
+    [data-theme="dark"] .contact-email-text {
+      color: #cbd5e1;
+    }
+    [data-theme="dark"] .btn-copy-small {
+      background: #1e293b;
+      border-color: #334155;
+      color: #cbd5e1;
+    }
+    [data-theme="dark"] .btn-copy-small:hover {
+      background: #334155;
+      color: #ffffff;
+    }
+    [data-theme="dark"] .btn-light-gray {
+      background: #1e293b;
+      border-color: #334155;
+      color: #cbd5e1;
+    }
+    [data-theme="dark"] .btn-light-gray:hover {
+      background: #334155;
+      color: #f8fafc;
+      border-color: #475569;
+    }
+    [data-theme="dark"] .draft-card-box {
+      background: #1e293b;
+      border-color: #334155;
+    }
+    [data-theme="dark"] .draft-card-header {
+      background: #111827;
+      border-bottom-color: #334155;
+    }
+    [data-theme="dark"] .draft-recipient-name {
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .draft-recipient-email {
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .draft-subject-input,
+    [data-theme="dark"] .draft-body-textarea {
+      background: #0f172a;
+      border-color: #334155;
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .draft-footer-bar {
+      background: #111827;
+      border-top-color: #334155;
+    }
+    [data-theme="dark"] .modal-content-card {
+      background: #111827;
+      border-color: #1f2937;
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .modal-header-bar,
+    [data-theme="dark"] .modal-footer-bar {
+      border-color: #1f2937;
+    }
+    [data-theme="dark"] .settings-input {
+      background: #1e293b;
+      border-color: #334155;
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .tab-btn-pill {
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .tab-btn-pill.active {
+      background: #1e293b;
+      color: #60a5fa;
+      border-color: #334155;
     }
 
     body {
@@ -1191,7 +1442,7 @@
             <span id="db-status-text">MongoDB Connected</span>
           </div>
           <button class="header-icon-btn" onclick="openSettings()" title="Settings">⚙</button>
-          <button class="header-icon-btn" onclick="toast('Theme toggle active', 'info')" title="Toggle Theme">☀️</button>
+          <button class="header-icon-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode">🌙</button>
           <div class="user-avatar-circle" onclick="openSettings()" title="Parth Srivastava" style="cursor:pointer; background:#1e293b;">P</div>
         </div>
       </header>
@@ -1620,11 +1871,34 @@
     let stopDraftingRequested = false;
 
     async function init() {
+      initTheme();
       renderSearchValues();
       await loadProfile();
       await checkDbStatus();
       await loadContacts();
       await loadDrafts();
+    }
+
+    function initTheme() {
+      const savedTheme = localStorage.getItem('autoapply_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      setTheme(savedTheme);
+    }
+
+    function setTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('autoapply_theme', theme);
+      const btn = document.getElementById('theme-toggle-btn');
+      if (btn) {
+        btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        btn.title = theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+      }
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+      const next = current === 'dark' ? 'light' : 'dark';
+      setTheme(next);
+      toast(`Switched to ${next === 'dark' ? 'Dark' : 'Light'} Mode`, 'info');
     }
 
     async function checkDbStatus() {
