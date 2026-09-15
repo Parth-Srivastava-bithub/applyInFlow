@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  latex-compiler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: latex-compiler
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+    # Security: Prevent privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    # Resource constraints
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+    # Optional: disable outbound network inside compiler container for maximum isolation
+    # network_mode: bridge

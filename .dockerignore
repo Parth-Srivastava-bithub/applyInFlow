@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env.example
+.chrome-playwright-session
+chrome_profile
+node_modules
+.tempmediaStorage
+.system_generated
+*.log
+scratch

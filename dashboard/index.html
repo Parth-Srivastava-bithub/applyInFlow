@@ -1,0 +1,3075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoApply — LinkedIn AI Outreach Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #090d16;
+      --surface: #0e1626;
+      --card: #121c2e;
+      --card-hover: #18243a;
+      --border: #263348;
+      --border-focus: #ffffff;
+      --accent: #000000;
+      --accent-hover: #1f2937;
+      --accent-soft: rgba(255, 255, 255, 0.08);
+      --success: #16a34a;
+      --success-soft: rgba(22, 163, 74, 0.15);
+      --danger: #dc2626;
+      --danger-soft: rgba(220, 38, 38, 0.15);
+      --warning: #eab308;
+      --warning-soft: rgba(234, 179, 8, 0.15);
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      --radius: 6px;
+      --radius-sm: 4px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13.5px;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Little Rounded Corners for Buttons & Elements ── */
+    .btn, button, .view-toggle-btn, .btn-primary, .btn-ai, .btn-secondary, .btn-success, .btn-danger, .btn-danger-outline, .btn-pending {
+      border-radius: 6px !important;
+    }
+    .btn-xs, .btn-dismiss, .btn-copy-email, .badge, .sent-badge-pill, .time-badge, .value-tag, .value-remove, .linkedin-link {
+      border-radius: 4px !important;
+    }
+    .input-box, select, textarea, .search-wrap, .upload-zone, .value-pill, .email-box, .step-card, .contact-card, .draft-card, .sidebar-column, .sidebar-view-toggle, .modal, .toast, #scrape-progress-box, .draft-body-input {
+      border-radius: 6px !important;
+    }
+    .progress-bar-track, .progress-bar-fill {
+      border-radius: 3px !important;
+    }
+
+    /* ── Header ── */
+    header {
+      background: rgba(14, 22, 38, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: var(--text);
+    }
+    .brand-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 0px !important;
+      background: #000000;
+      border: 1px solid #ca8a04;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: #eab308;
+      font-weight: bold;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ── Layout ── */
+    .app-layout {
+      display: flex;
+      gap: 20px;
+      max-width: 1380px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 20px 24px 60px;
+      align-items: flex-start;
+    }
+
+    .main-column {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ── Right Sidebar Column ── */
+    .sidebar-column {
+      width: 410px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0px !important;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: sticky;
+      top: 65px;
+      max-height: calc(100vh - 85px);
+    }
+
+    @media (max-width: 1060px) {
+      .app-layout {
+        flex-direction: column-reverse;
+      }
+      .sidebar-column {
+        width: 100%;
+        position: static;
+        max-height: 550px;
+      }
+    }
+
+    /* ── Step Cards ── */
+    .step-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0px !important;
+      padding: 16px 20px;
+      transition: border-color .15s;
+    }
+    .step-card:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .step-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .step-num {
+      width: 20px;
+      height: 20px;
+      border-radius: 0px !important;
+      background: #000000;
+      color: #ffffff;
+      border: 1px solid #4b5563;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Inputs ── */
+    .topic-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .input-box {
+      flex: 1;
+      background: #080c16;
+      border: 1px solid #374151;
+      border-radius: 0px !important;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .12s;
+    }
+    .input-box:focus {
+      border-color: #ffffff;
+      background: #0f172a;
+    }
+    .input-box::placeholder { color: var(--text-dim); }
+
+    /* ── Compact Values Grid ── */
+    .values-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .value-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0d1424;
+      border: 1px solid #263348;
+      border-radius: 0px !important;
+      padding: 5px 9px;
+      transition: border-color .12s;
+    }
+    .value-pill:hover { border-color: #4b5563; }
+    .value-tag {
+      font-family: 'Fira Code', monospace;
+      font-size: 10px;
+      font-weight: 600;
+      color: #9ca3af;
+      background: #000000;
+      border: 1px solid #374151;
+      padding: 2px 6px;
+      border-radius: 0px !important;
+      flex-shrink: 0;
+    }
+    .value-text {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 12.5px;
+      font-family: inherit;
+      outline: none;
+    }
+    .value-remove {
+      cursor: pointer;
+      color: #ef4444;
+      font-size: 12px;
+      padding: 2px 4px;
+      border-radius: 0px !important;
+      transition: color .12s;
+    }
+    .value-remove:hover {
+      background: #dc2626;
+      color: #ffffff;
+    }
+
+    /* ── Little Rounded Buttons (Plain Green, Red, Black, Yellow Palette) ── */
+    .btn {
+      padding: 7px 14px;
+      border-radius: 6px !important;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid #374151;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all .12s ease;
+      text-decoration: none;
+      white-space: nowrap;
+      background: #000000;
+      color: #ffffff;
+    }
+    .btn-xs {
+      padding: 5px 9px;
+      font-size: 11.5px;
+      border-radius: 4px !important;
+    }
+
+    /* Black & White Controls */
+    .btn-primary {
+      background: #000000 !important;
+      color: #ffffff !important;
+      border: 1px solid #4b5563 !important;
+    }
+    .btn-primary:hover {
+      background: #182234 !important;
+      border-color: #9ca3af !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+    }
+    .btn-ai {
+      background: #000000 !important;
+      color: #ffffff !important;
+      border: 1px solid #4b5563 !important;
+    }
+    .btn-ai:hover {
+      background: #182234 !important;
+      border-color: #9ca3af !important;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+    }
+    .btn-secondary {
+      background: #0a0e18 !important;
+      border: 1px solid #2e3a50 !important;
+      color: #e5e7eb !important;
+    }
+    .btn-secondary:hover {
+      background: #182234 !important;
+      border-color: #6b7280 !important;
+      color: #ffffff !important;
+    }
+
+    /* Green (Sent / Outreach Success) — Soothing Green Border & Text */
+    .btn-success {
+      background: rgba(34, 197, 94, 0.08) !important;
+      color: #4ade80 !important;
+      border: 1px solid #22c55e !important;
+      font-weight: 600 !important;
+    }
+    .btn-success:hover {
+      background: rgba(34, 197, 94, 0.22) !important;
+      color: #ffffff !important;
+      border-color: #4ade80 !important;
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
+    }
+    .btn-success:disabled {
+      background: transparent !important;
+      border-color: rgba(34, 197, 94, 0.2) !important;
+      color: rgba(74, 222, 128, 0.35) !important;
+      cursor: not-allowed !important;
+      box-shadow: none !important;
+    }
+
+    /* Red (Stop / Clear / Dismiss) — Soothing Red Border & Text */
+    .btn-danger, .btn-danger-outline {
+      background: rgba(239, 68, 68, 0.08) !important;
+      border: 1px solid #ef4444 !important;
+      color: #f87171 !important;
+      font-weight: 600 !important;
+    }
+    .btn-danger:hover, .btn-danger-outline:hover {
+      background: rgba(239, 68, 68, 0.22) !important;
+      border-color: #f87171 !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+    }
+    .btn-danger-outline:disabled {
+      background: transparent !important;
+      border-color: rgba(239, 68, 68, 0.2) !important;
+      color: rgba(248, 113, 113, 0.35) !important;
+      cursor: not-allowed !important;
+      box-shadow: none !important;
+    }
+
+    /* Yellow (Pending / In-Progress) — Soothing Yellow Border & Text */
+    .btn-pending {
+      background: rgba(234, 179, 8, 0.08) !important;
+      color: #facc15 !important;
+      border: 1px solid #eab308 !important;
+      font-weight: 700 !important;
+    }
+    .btn-pending:hover {
+      background: rgba(234, 179, 8, 0.22) !important;
+      color: #fef08a !important;
+      border-color: #fde047 !important;
+      box-shadow: 0 0 12px rgba(250, 204, 21, 0.25);
+    }
+    .btn-pending:disabled {
+      background: transparent !important;
+      border-color: rgba(234, 179, 8, 0.2) !important;
+      color: rgba(250, 204, 21, 0.35) !important;
+      cursor: not-allowed !important;
+      box-shadow: none !important;
+    }
+
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Progress Bar ── */
+    .progress-bar-track {
+      width: 100%;
+      height: 6px;
+      background: #1f2937;
+      border-radius: 0px !important;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: #ffffff;
+      border-radius: 0px !important;
+      transition: width 0.3s ease;
+    }
+    .live-pulse {
+      width: 7px;
+      height: 7px;
+      background: #16a34a;
+      display: inline-block;
+    }
+
+    /* ── Resume Zone ── */
+    .upload-zone {
+      border: 1px dashed #374151;
+      border-radius: 0px !important;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0d1424;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .upload-zone:hover { border-color: #6b7280; }
+    .upload-info { display: flex; align-items: center; gap: 10px; }
+    .file-icon {
+      width: 30px; height: 30px; border-radius: 0px !important;
+      background: #000000; border: 1px solid #374151; color: #ffffff;
+      display: flex; align-items: center; justify-content: center; font-size: 15px;
+    }
+
+    /* ── Draft Cards ── */
+    .drafts-container { display: flex; flex-direction: column; gap: 10px; }
+    .draft-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0px !important;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .draft-card.sent {
+      border-color: #16a34a;
+      background: rgba(22, 163, 74, 0.05);
+    }
+    .draft-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .recip-name { font-weight: 700; font-size: 13.5px; }
+    .recip-email { font-size: 12px; color: #9ca3af; font-family: 'Fira Code', monospace; }
+    .draft-body-input {
+      background: #080c16;
+      border: 1px solid #374151;
+      border-radius: 6px !important;
+      padding: 12px 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+      min-height: 200px;
+      width: 100%;
+      box-sizing: border-box;
+      outline: none;
+      overflow-y: hidden; /* No inner scrollbar - shows full content */
+    }
+    .draft-body-input:focus { border-color: #ffffff; }
+    .draft-footer { display: flex; align-items: center; justify-content: space-between; }
+    
+    /* ── Match & Fit Scoring Elements ── */
+    .fit-meta-row {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      background: #090e1a;
+      border: 1px solid #1f2c42;
+      border-radius: 6px !important;
+      padding: 9px 12px;
+      margin-top: 2px;
+      margin-bottom: 2px;
+    }
+    .fit-score-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge-fit-score {
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px !important;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .fit-strong {
+      background: rgba(34, 197, 94, 0.15) !important;
+      color: #4ade80 !important;
+      border: 1px solid #22c55e !important;
+    }
+    .fit-moderate {
+      background: rgba(234, 179, 8, 0.15) !important;
+      color: #facc15 !important;
+      border: 1px solid #eab308 !important;
+    }
+    .fit-poor {
+      background: rgba(239, 68, 68, 0.15) !important;
+      color: #f87171 !important;
+      border: 1px solid #ef4444 !important;
+    }
+    .dealbreaker-banner {
+      background: rgba(220, 38, 38, 0.15);
+      border: 1px solid #dc2626;
+      border-radius: 4px !important;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fca5a5;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .fit-tags-wrap {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .fit-tag-pill {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px !important;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .fit-tag-match {
+      background: rgba(34, 197, 94, 0.1);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.35);
+    }
+    .fit-tag-miss {
+      background: rgba(239, 68, 68, 0.1);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    
+    /* ── Badges ── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 0px !important; font-size: 11px; font-weight: 700;
+      border: 1px solid transparent;
+    }
+    .badge-sent {
+      background: rgba(34, 197, 94, 0.1) !important;
+      color: #4ade80 !important;
+      border: 1px solid #22c55e !important;
+    }
+    .badge-draft, .badge-pending {
+      background: rgba(234, 179, 8, 0.1) !important;
+      color: #facc15 !important;
+      border: 1px solid #eab308 !important;
+    }
+    .badge-accent {
+      background: rgba(255, 255, 255, 0.05) !important;
+      color: #ffffff !important;
+      border: 1px solid #4b5563 !important;
+    }
+    .badge-gmail {
+      background: rgba(239, 68, 68, 0.1) !important;
+      color: #f87171 !important;
+      border: 1px solid #ef4444 !important;
+    }
+
+    /* ── Sidebar Styles ── */
+    .sidebar-header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-view-toggle {
+      display: flex;
+      background: #000000;
+      padding: 3px;
+      border-radius: 0px !important;
+      border: 1px solid #263348;
+      gap: 4px;
+      width: 100%;
+    }
+    .view-toggle-btn {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      border-radius: 0px !important;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #9ca3af;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.12s ease;
+      font-family: inherit;
+    }
+    .view-toggle-btn:hover {
+      color: #ffffff;
+      background: #1f2937;
+    }
+    .view-toggle-btn.active#tab-pending {
+      background: rgba(234, 179, 8, 0.12) !important;
+      color: #facc15 !important;
+      border: 1px solid #eab308 !important;
+      font-weight: 700 !important;
+      box-shadow: 0 0 10px rgba(250, 204, 21, 0.18) !important;
+    }
+    .view-toggle-btn.active#tab-sent {
+      background: rgba(34, 197, 94, 0.12) !important;
+      color: #4ade80 !important;
+      border: 1px solid #22c55e !important;
+      font-weight: 700 !important;
+      box-shadow: 0 0 10px rgba(34, 197, 94, 0.18) !important;
+    }
+    .sent-card {
+      border-left: 3px solid #22c55e !important;
+    }
+    .sent-badge-pill {
+      font-size: 9.5px;
+      font-weight: 700;
+      background: rgba(34, 197, 94, 0.1) !important;
+      color: #4ade80 !important;
+      padding: 2px 6px;
+      border-radius: 0px !important;
+      border: 1px solid #22c55e !important;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .sidebar-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .sidebar-tools {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .search-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+    .search-input {
+      padding-left: 28px !important;
+      padding-right: 24px !important;
+      padding-top: 6px !important;
+      padding-bottom: 6px !important;
+      font-size: 12px !important;
+      border-radius: 0px !important;
+    }
+    .search-clear {
+      position: absolute;
+      right: 9px;
+      cursor: pointer;
+      color: #ef4444;
+      font-size: 11px;
+    }
+    
+    .sidebar-actions-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    /* Contacts List Scroll Container */
+    .contacts-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding-right: 2px;
+    }
+    .contacts-list::-webkit-scrollbar { width: 4px; }
+    .contacts-list::-webkit-scrollbar-thumb { background: #374151; border-radius: 0px !important; }
+
+    /* Contact Card — Sleek & Compact */
+    .contact-card {
+      background: #0d1424;
+      border: 1px solid #263348;
+      border-radius: 0px !important;
+      padding: 7px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      transition: all .12s ease;
+      position: relative;
+    }
+    .contact-card:hover {
+      border-color: #4b5563;
+      background: #111b30;
+    }
+    .contact-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .contact-name-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .contact-name {
+      font-weight: 700;
+      font-size: 12.5px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 175px;
+    }
+    .contact-meta-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .time-badge {
+      font-size: 10px;
+      color: #9ca3af;
+      font-weight: 500;
+      border-radius: 0px !important;
+    }
+    .btn-dismiss {
+      background: transparent;
+      border: 1px solid transparent;
+      color: #ef4444;
+      cursor: pointer;
+      font-size: 11px;
+      padding: 1px 5px;
+      border-radius: 0px !important;
+      transition: all .12s;
+      line-height: 1;
+    }
+    .btn-dismiss:hover {
+      background: #dc2626;
+      color: #ffffff;
+      border-color: #b91c1c;
+    }
+    .linkedin-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      background: #111827;
+      color: #9ca3af;
+      border: 1px solid #374151;
+      font-size: 8.5px;
+      font-weight: bold;
+      border-radius: 0px !important;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .linkedin-link:hover {
+      background: #1f2937;
+      color: #ffffff;
+      border-color: #6b7280;
+    }
+
+    .email-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      background: #080c16;
+      border: 1px solid #263348;
+      border-radius: 0px !important;
+      padding: 4px 7px;
+    }
+    .email-address-text {
+      font-family: 'Fira Code', monospace;
+      font-size: 11px;
+      color: #f3f4f6;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn-copy-email {
+      background: #111827;
+      border: 1px solid #374151;
+      color: #9ca3af;
+      cursor: pointer;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 0px !important;
+      transition: all .12s;
+      flex-shrink: 0;
+    }
+    .btn-copy-email:hover {
+      background: #1f2937;
+      color: #ffffff;
+      border-color: #6b7280;
+    }
+
+    .post-snippet {
+      font-size: 10.5px;
+      color: #9ca3af;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .contact-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .contact-title-compact {
+      font-size: 10.5px;
+      color: #9ca3af;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 175px;
+    }
+    .btn-draft-compact {
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 0px !important;
+      flex-shrink: 0;
+    }
+
+    .empty-contacts-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 30px 12px;
+      color: var(--text-dim);
+      gap: 6px;
+    }
+
+    /* ── Settings Modal ── */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+      opacity: 0; pointer-events: none; transition: opacity .15s;
+    }
+    .modal-backdrop.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px !important; width: 520px; max-width: 95vw; max-height: 90vh;
+      overflow-y: auto; padding: 20px 24px;
+    }
+    .form-group { margin-bottom: 10px; }
+    .form-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+    .toast-box { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 6px; z-index: 200; }
+    .toast {
+      background: #000000; border: 1px solid #374151;
+      padding: 9px 14px; border-radius: 0px !important; font-size: 12.5px; color: #ffffff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      AutoApply
+    </div>
+    <div class="header-actions">
+      <span id="db-status-badge" class="badge badge-sent" title="Connected to MongoDB cluster">🟢 MongoDB Connected</span>
+      <span id="contacts-count-badge" class="badge badge-pending">0 Contacts Ready</span>
+      <button class="btn btn-secondary" onclick="openSettings()">⚙ Settings</button>
+    </div>
+  </header>
+
+  <!-- TWO-COLUMN WORKFLOW LAYOUT -->
+  <div class="app-layout">
+
+    <!-- MAIN COLUMN: Workflow, Resume, Drafts -->
+    <main class="main-column">
+
+      <!-- STEP 1: AI Topic & 10 Value Generator -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-title">
+            <div class="step-num">1</div>
+            Search Keywords & Generator
+          </div>
+          <span style="font-size: 11.5px; color: var(--text-dim);">Playwright CDP</span>
+        </div>
+
+        <div class="topic-row">
+          <input type="text" id="target-topic" class="input-box" placeholder="Target role (e.g. AI ML Engineer, Full Stack Python)" value="AI ML Engineer" />
+          <button class="btn btn-ai" id="btn-gen-queries" onclick="generateAiQueries()">
+            ✨ AI Generate 10 Values
+          </button>
+        </div>
+
+        <!-- 10 Generated Search Query Values List -->
+        <div class="values-container" id="values-container">
+          <!-- Populated with Value 1 ... Value 10 -->
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="btn btn-danger-outline" id="btn-stop-scrape" onclick="stopScraping()" style="display:none;">
+            ⛔ Stop
+          </button>
+          <button class="btn btn-primary" id="btn-scrape-all" onclick="startScrapeWithValues()">
+            🚀 Search LinkedIn for HR Gmails
+          </button>
+        </div>
+
+        <!-- LIVE ANIMATED PROGRESS BOX -->
+        <div id="scrape-progress-box" style="display:none; background: #0c1424; border: 1px solid #263348; border-radius: 6px !important; padding: 12px 14px; margin-top: 10px;">
+          <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 6px;">
+            <span style="font-size: 12.5px; font-weight: 600; display:flex; align-items:center; gap: 7px; color: #ffffff;">
+              <span class="live-pulse" id="prog-pulse" style="background: #22c55e;"></span>
+              <span id="prog-title">Searching LinkedIn...</span>
+            </span>
+            <span style="font-size: 12.5px; font-family: 'Fira Code', monospace; font-weight: 700; color: #ffffff;" id="prog-pct">0%</span>
+          </div>
+
+          <div class="progress-bar-track" style="background: #1e293b; border-radius: 3px !important;">
+            <div class="progress-bar-fill" id="prog-bar" style="width: 0%; background: #ffffff; border-radius: 3px !important;"></div>
+          </div>
+
+          <div style="display:flex; justify-content: space-between; align-items:center; margin-top: 8px; font-size: 11.5px; color: #cbd5e1;">
+            <span id="prog-status" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 390px; color: #cbd5e1; font-weight: 500;">Connecting to Chrome...</span>
+            <div style="display:flex; align-items:center; gap: 8px; flex-shrink:0;">
+              <span id="prog-found" style="font-weight: 700; color: #4ade80;">0 Contacts</span>
+              <button class="btn btn-xs btn-danger-outline" id="btn-stop-inline" onclick="stopScraping()" style="display:none; padding: 2px 8px; font-size: 11px;">⛔ Stop</button>
+            </div>
+          </div>
+
+          <!-- DROPDOWN: Newly Found Gmails in this Run -->
+          <div id="found-emails-dropdown-wrap" style="display:none; margin-top: 12px; border-top: 1px solid #263348; padding-top: 10px;">
+            <button type="button" id="btn-toggle-found-emails" onclick="toggleFoundEmailsDropdown()" 
+                    style="width: 100%; display: flex; align-items: center; justify-content: space-between; background: rgba(234, 179, 8, 0.08); border: 1px solid #eab308; padding: 7px 12px; color: #facc15; font-size: 12px; font-weight: 700; cursor: pointer; border-radius: 6px !important; transition: all 0.15s ease;">
+              <span style="display: flex; align-items: center; gap: 8px;">
+                <span id="found-dropdown-icon" style="font-size: 10px; transition: transform 0.2s ease;">▼</span>
+                <span>Found Gmails In This Run</span>
+                <span id="found-emails-count-pill" style="background: rgba(234, 179, 8, 0.2); border: 1px solid #facc15; color: #fef08a; padding: 1px 7px; font-size: 11px; font-family: 'Fira Code', monospace; font-weight: 700; border-radius: 4px !important;">0 New</span>
+              </span>
+              <span id="found-dropdown-action-hint" style="font-size: 11px; color: #9ca3af; font-weight: 500;">Click to toggle</span>
+            </button>
+
+            <div id="found-emails-list" style="margin-top: 8px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px;">
+              <!-- Dynamically populated with found contact cards -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2: Resume PDF Attachment -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-title">
+            <div class="step-num">2</div>
+            Resume Attachment
+          </div>
+        </div>
+        <div class="upload-zone" onclick="document.getElementById('resume-file').click()">
+          <div class="upload-info">
+            <div class="file-icon">📄</div>
+            <div>
+              <div style="font-weight: 500; font-size: 13px;" id="resume-filename">Click to upload your Resume (PDF/DOCX)</div>
+              <div style="font-size: 11px; color: var(--text-dim);">Extracts background context & attaches file to outgoing emails</div>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-xs" style="pointer-events: none;">Browse File</button>
+          <input type="file" id="resume-file" style="display:none" accept=".pdf,.doc,.docx" onchange="uploadResume(this)" />
+        </div>
+      </div>
+
+      <!-- STEP 3: Batch Draft & Apply Controls -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-title">
+            <div class="step-num">3</div>
+            Draft & Outreach Controls
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 12px; color: var(--text-dim);">Model:</span>
+            <select id="ai-model-select" class="input-box" style="padding: 6px 10px; width: 260px; font-size: 12.5px;">
+              <option value="qwen/qwen3.8-27b" selected>Groq: Qwen 3.8 27B (Default)</option>
+              <option value="openai/gpt-oss-120b">Groq: GPT OSS 120B</option>
+              <option value="groq/compound">Groq: Compound</option>
+              <option value="gpt-4o-mini-2024-07-18">OpenAI: GPT-4o Mini (Optional)</option>
+            </select>
+            <span style="font-size: 12px; color: var(--text-dim);">Count:</span>
+            <select id="apply-count" class="input-box" style="padding: 6px 10px; width: 140px; font-size: 12px;">
+              <option value="10pct">10% of Pending</option>
+              <option value="20pct" selected>20% of Pending</option>
+              <option value="50pct">50% of Pending</option>
+              <option value="all">100% (All Pending)</option>
+            </select>
+            <span style="font-size: 12px; color: var(--text-dim);">Filter:</span>
+            <select id="match-filter" class="input-box" style="padding: 6px 10px; width: 175px; font-size: 12px;">
+              <option value="all" selected>All Pending Leads</option>
+              <option value="skip_gaps">⚡ Skip Exp Gaps (5+ yrs)</option>
+              <option value="strong_only">🟢 Strong Fits Only (≥70%)</option>
+            </select>
+            <button class="btn btn-primary" id="btn-gen-drafts" onclick="generateBatchDrafts()">
+              ⚡ Generate Drafts
+            </button>
+            <button class="btn btn-danger-outline" id="btn-stop-drafts" onclick="stopDrafting()" style="display:none;" title="Stop creating drafts and review current ones">
+              ⛔ Stop
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 4: Review & Send Outgoing Drafts -->
+      <div class="step-card" id="step-4-card" style="margin-top: 14px;">
+        <div class="step-header" style="margin-bottom: 0;">
+          <div class="step-title">
+            <div class="step-num">4</div>
+            Review & Send Cold Emails (<span id="review-drafts-count">0</span>)
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 11.5px; color: var(--text-dim);">Sort:</span>
+            <select id="draft-sort-select" class="input-box" style="padding: 4px 8px; font-size: 11.5px; width: 165px;" onchange="changeDraftSort(this.value)">
+              <option value="score" selected>🎯 Highest Match First</option>
+              <option value="date">🕒 Newest First</option>
+            </select>
+            <button class="btn btn-xs btn-primary" id="btn-tailor-all-resumes" onclick="tailorAllDraftResumes()" title="Auto-tailor resumes for all pending drafts using XeLaTeX" disabled>
+              🎯 Tailor All (<span id="tailor-all-count">0</span>)
+            </button>
+            <button class="btn btn-xs btn-danger-outline" id="btn-stop-tailor-all" onclick="stopTailorAllDrafts()" style="display:none;" title="Stop batch tailoring">
+              ⛔ Stop
+            </button>
+            <button class="btn btn-xs btn-danger-outline" id="btn-clear-all-drafts" onclick="clearAllDraftsPrompt()" title="Clear all generated drafts (contacts & sent history stay safe)" disabled>
+              🗑 Clear All Drafts (<span id="clear-drafts-count">0</span>)
+            </button>
+            <button class="btn btn-xs btn-success" id="btn-apply-all" onclick="applyToAll()" disabled>
+              ✉ Send All (<span id="apply-all-count">0</span>)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Drafts Container -->
+      <div class="drafts-container" id="drafts-container" style="margin-top: 10px;">
+        <!-- Draft cards -->
+      </div>
+
+    </main>
+
+    <!-- RIGHT SIDEBAR: Pending vs Sent View Toggle -->
+    <aside class="sidebar-column">
+      <div class="sidebar-header">
+        <div class="sidebar-view-toggle">
+          <button class="view-toggle-btn active" id="tab-pending" onclick="setSidebarView('pending')" title="View pending Gmail leads">
+            📬 Pending (<span id="count-pending">0</span>)
+          </button>
+          <button class="view-toggle-btn" id="tab-sent" onclick="setSidebarView('sent')" title="View validated sent emails">
+            ✓ Sent (<span id="count-sent">0</span>)
+          </button>
+        </div>
+      </div>
+
+      <!-- Compact Search & Action Toolbar -->
+      <div class="sidebar-tools">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="contact-search" class="input-box search-input" placeholder="Search pending Gmails..." oninput="onContactSearch(this.value)" />
+          <span id="search-clear" class="search-clear" style="display:none;" onclick="clearContactSearch()">✕</span>
+        </div>
+
+        <div class="sidebar-actions-bar">
+          <button class="btn btn-xs btn-secondary" onclick="copyAllEmails()" title="Copy all visible emails">
+            📋 Copy All (<span id="copy-count">0</span>)
+          </button>
+          <button class="btn btn-xs btn-secondary" onclick="exportContactsCSV()" title="Download CSV">
+            📥 CSV
+          </button>
+          <button class="btn btn-xs btn-danger-outline" id="btn-clear-contacts" onclick="clearAllContactsPrompt()" title="Clear pending contacts">
+            🗑 Clear
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable Sleek Contacts List -->
+      <div class="contacts-list" id="contacts-list">
+        <!-- Populated dynamically by renderContacts() -->
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-backdrop" id="settings-modal">
+    <div class="modal">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+        <h3 style="font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
+          <span>⚙</span> Settings & Credentials
+        </h3>
+        <button class="btn-dismiss" onclick="closeSettings()" title="Close">✕</button>
+      </div>
+
+      <!-- Section 1: Candidate Profile -->
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+        Candidate Profile
+      </div>
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <input id="s-name" class="input-box" style="width:100%" placeholder="e.g. Parth Srivastava" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Target Role</label>
+        <input id="s-role" class="input-box" style="width:100%" placeholder="e.g. AI / ML Engineer" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Key Skills</label>
+        <input id="s-skills" class="input-box" style="width:100%" placeholder="Python, PyTorch, LangChain, RAG..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Experience</label>
+        <input id="s-exp" class="input-box" style="width:100%" placeholder="2+ years building production ML systems..." />
+      </div>
+
+      <!-- Section 2: Gmail SMTP Credentials -->
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin: 16px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+        Gmail SMTP Credentials (Outgoing Outreach)
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gmail Address (Sender)</label>
+        <input id="s-gmail" class="input-box" style="width:100%" type="email" placeholder="your.name@gmail.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gmail App Password</label>
+        <input id="s-pwd" class="input-box" style="width:100%" type="password" placeholder="16-character App Password" />
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 3px;">
+          Generated from Google Account &gt; Security &gt; 2-Step Verification &gt; App Passwords.
+        </div>
+      </div>
+
+      <!-- Section 3: Database & AI API Keys (Personal Use) -->
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin: 16px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+        Database &amp; AI API Keys (Personal Use)
+      </div>
+      <div class="form-group">
+        <label class="form-label">MongoDB Connection URI</label>
+        <input id="s-mongo-uri" class="input-box" style="width:100%; font-family: 'Fira Code', monospace; font-size: 11.5px;" placeholder="mongodb+srv://user:pass@cluster.mongodb.net/?appName=..." />
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 3px;">
+          MongoDB Atlas or local URI. Connects automatically on save to store and deduplicate leads.
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Groq API Key</label>
+        <input id="s-groq-key" class="input-box" style="width:100%; font-family: 'Fira Code', monospace; font-size: 11.5px;" type="password" placeholder="gsk_..." />
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 3px;">
+          Powers query generation &amp; fast email drafting (Qwen 3.8 27B / GPT-OSS 120B).
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">OpenAI API Key (Optional)</label>
+        <input id="s-openai-key" class="input-box" style="width:100%; font-family: 'Fira Code', monospace; font-size: 11.5px;" type="password" placeholder="sk-proj-... (Optional)" />
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 3px;">
+          Optional fallback key if you choose to use OpenAI models.
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+        <button class="btn btn-secondary btn-xs" onclick="closeSettings()">Cancel</button>
+        <button class="btn btn-primary btn-xs" onclick="saveSettings()">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tailor Resume & Live PDF Preview Modal -->
+  <div class="modal-backdrop" id="modal-tailor-resume">
+    <div class="modal" style="width: 1200px; max-width: 95vw; height: 90vh; max-height: 90vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid var(--border-bright);">
+      <!-- Header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 18px;">🎯</span>
+          <div>
+            <div style="font-weight: 700; font-size: 14.5px; color: var(--text);">Tailor LaTeX Resume for Application</div>
+            <div style="font-size: 11.5px; color: var(--text-dim);" id="tailor-recip-info">Recipient: HR Recruiter</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-xs btn-secondary" onclick="toggleLatexEditorTab()" id="btn-toggle-editor">📝 Edit Raw LaTeX</button>
+          <button class="btn-dismiss" onclick="closeTailorModal()" style="font-size: 16px;">✕</button>
+        </div>
+      </div>
+
+      <!-- Split Body: Left PDF Preview (60%), Right AI Refinements & Editor (40%) -->
+      <div style="display: flex; flex: 1; overflow: hidden; background: #070a12;">
+        <!-- Left: Live PDF Preview Frame -->
+        <div style="flex: 1.3; border-right: 1px solid var(--border); display: flex; flex-direction: column; position: relative;">
+          <div style="padding: 6px 14px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase;">📄 Live PDF Preview (XeLaTeX Docker)</span>
+            <a id="tailor-pdf-link" href="#" target="_blank" style="font-size: 11.5px; color: var(--primary); text-decoration: none;">↗ Open Full View</a>
+          </div>
+          <div style="flex: 1; position: relative; background: #1a1d24; display: flex; align-items: center; justify-content: center;" id="tailor-preview-container">
+            <div id="tailor-loading-spinner" style="display:none; position: absolute; inset: 0; background: rgba(5,8,15,0.85); z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;">
+              <div style="width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+              <div style="font-size: 12.5px; font-weight: 600; color: #ffffff;" id="tailor-loading-text">Tailoring & Compiling Resume with XeLaTeX...</div>
+            </div>
+            <iframe id="tailor-pdf-iframe" src="about:blank" style="width: 100%; height: 100%; border: none;"></iframe>
+          </div>
+        </div>
+
+        <!-- Right: AI Refinement & Feedback Controls -->
+        <div style="flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow-y: auto; padding: 16px 18px; gap: 12px;">
+          <!-- Recruiter Post Snippet Box -->
+          <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;">
+            <div style="font-size: 11px; font-weight: 700; color: #9ca3af; text-transform: uppercase; margin-bottom: 4px;">Recruiter Job Post Context</div>
+            <div id="tailor-post-snippet" style="font-size: 11.5px; color: var(--text-dim); max-height: 80px; overflow-y: auto; line-height: 1.4; white-space: pre-wrap;"></div>
+          </div>
+
+          <!-- Quick 1-Click Skills Sync Box (Safe & Fast - Edits Skills Only) -->
+          <div style="background: rgba(34, 197, 94, 0.07); border: 1px solid rgba(34, 197, 94, 0.35); border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 12px; font-weight: 700; color: #4ade80; display: flex; align-items: center; gap: 6px;">
+                ⚡ Quick Action: Sync Missing Skills to Resume
+              </span>
+              <span style="font-size: 10px; color: #86efac; background: rgba(34, 197, 94, 0.15); padding: 1px 6px; border-radius: 3px; border: 1px solid rgba(34, 197, 94, 0.3);">Safe • Skills Section Only</span>
+            </div>
+            <div style="font-size: 11.5px; color: #9ca3af;" id="tailor-missing-skills-hint">
+              Surgically injects missing post requirements directly into <code style="color:#f3f4f6; background:#080c16; padding:1px 4px; border-radius:3px;">\section*{Skills}</code> without touching experience, projects, or formatting.
+            </div>
+            <div id="tailor-modal-missing-chips" style="display: flex; flex-wrap: wrap; gap: 5px;"></div>
+            <button class="btn btn-xs btn-success" id="btn-modal-quick-sync" onclick="quickTailorCurrentModalSkills()" style="align-self: flex-start; padding: 5px 12px; font-size: 11.5px;">
+              ⚡ 1-Click Sync Missing Skills to Resume
+            </button>
+          </div>
+
+          <!-- Feedback Mode -->
+          <div id="tailor-feedback-panel" style="display: flex; flex-direction: column; gap: 10px; flex: 1;">
+            <label class="form-label" style="margin-bottom: 0;">
+              ✨ Custom AI Adjustments (Optional):
+            </label>
+            <textarea id="tailor-feedback-input" class="input-box" style="height: 80px; font-size: 12px; line-height: 1.4; resize: none;" placeholder="e.g. Shorten project 1 bullet points so it fits cleanly on 1 page..."></textarea>
+            
+            <button class="btn btn-primary btn-xs" id="btn-submit-tailor" onclick="submitTailorFeedback()" style="align-self: flex-start;">
+              ✨ Run Full Custom Re-tailor
+            </button>
+          </div>
+
+          <!-- Raw Code Editor Mode (Hidden by default, toggleable) -->
+          <div id="tailor-editor-panel" style="display: none; flex-direction: column; gap: 8px; flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label class="form-label" style="margin-bottom: 0;">Raw LaTeX Source Code:</label>
+              <button class="btn btn-secondary btn-xs" onclick="recompileRawTex()">🔄 Recompile PDF</button>
+            </div>
+            <textarea id="tailor-raw-tex" class="input-box" style="flex: 1; height: 260px; font-family: 'Fira Code', monospace; font-size: 11px; line-height: 1.4; resize: none;"></textarea>
+          </div>
+
+          <!-- Bottom Action Bar -->
+          <div style="margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <button class="btn btn-secondary btn-xs" onclick="closeTailorModal()">Cancel</button>
+            <button class="btn btn-success btn-xs" id="btn-apply-tailored-resume" onclick="applyTailoredResumeToDraft()">
+              ✅ Use Tailored Resume for this Email
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-box" id="toast-box"></div>
+
+  <script>
+    let searchValues = [
+      "hr with mail AI ML Engineer",
+      "mail your cv AI ML Engineer gmail",
+      "send resume AI ML Engineer gmail",
+      "hiring AI ML Engineer gmail india",
+      "urgent hiring AI Engineer send cv gmail",
+      "ML Engineer hiring recruiter gmail",
+      "immediate joiner AI ML Engineer gmail",
+      "contract AI ML Engineer remote gmail",
+      "looking for AI ML Engineer mail cv",
+      "mail cv hiring AI ML recruiter"
+    ];
+
+    let contacts = [];
+    let sentEmails = [];
+    let drafts = [];
+    let profile = {};
+    let sidebarView = 'pending'; // 'pending' or 'sent'
+    let searchQuery = '';
+    let stopDraftingRequested = false;
+
+    async function init() {
+      renderSearchValues();
+      await loadProfile();
+      await checkDbStatus();
+      await loadContacts();
+      await loadDrafts();
+      try {
+        const res = await fetch('/api/scrape-status');
+        const st = await res.json();
+        if (st && st.new_contacts && st.new_contacts.length > 0) {
+          currentRunFoundContacts = st.new_contacts;
+          renderFoundEmailsDropdown(currentRunFoundContacts);
+          const progBox = document.getElementById('scrape-progress-box');
+          const progBar = document.getElementById('prog-bar');
+          const progPct = document.getElementById('prog-pct');
+          const progTitle = document.getElementById('prog-title');
+          const progStatus = document.getElementById('prog-status');
+          const progFound = document.getElementById('prog-found');
+          if (progBox) progBox.style.display = 'block';
+          if (progBar) progBar.style.width = `${st.percent || 100}%`;
+          if (progPct) {
+            progPct.textContent = `${st.percent || 100}%`;
+            progPct.style.color = (st.percent === 100 || !st.is_running) ? '#4ade80' : '#ffffff';
+          }
+          if (progTitle) progTitle.textContent = (st.percent === 100 || !st.is_running) ? 'Done (✓)' : `Query ${st.current_query_index} of ${st.total_queries}`;
+          if (progStatus) progStatus.textContent = st.status_text || 'Idle';
+          if (progFound) progFound.textContent = `+${st.found_count || currentRunFoundContacts.length} New Contacts`;
+        }
+      } catch (e) {}
+    }
+
+    async function checkDbStatus() {
+      try {
+        const res = await fetch('/api/db-status');
+        const data = await res.json();
+        const badge = document.getElementById('db-status-badge');
+        const pendingN = data.pending_count ?? data.pending_gmail_count ?? 0;
+        const sentN = data.sent_count ?? data.applied_count ?? 0;
+        if (data.connected) {
+          badge.className = 'badge badge-sent';
+          badge.innerHTML = `🟢 MongoDB Connected (${pendingN} Pending, ${sentN} Sent)`;
+          badge.title = `MongoDB Atlas Connected. ${pendingN} Pending Gmails, ${sentN} Sent Emails in permanent DB.`;
+        } else {
+          badge.className = 'badge badge-draft';
+          badge.innerHTML = `🟡 Local Storage (${pendingN} Pending, ${sentN} Sent)`;
+          badge.title = 'Operating in local JSON storage mode.';
+        }
+      } catch (e) {
+        console.warn('DB status check error', e);
+      }
+    }
+
+    function renderSearchValues() {
+      const container = document.getElementById('values-container');
+      container.innerHTML = searchValues.map((v, i) => `
+        <div class="value-pill">
+          <span class="value-tag">${i + 1}</span>
+          <input class="value-text" value="${esc(v)}" onchange="updateValue(${i}, this.value)" />
+          <span class="value-remove" onclick="removeValue(${i})">✕</span>
+        </div>
+      `).join('');
+    }
+
+    function updateValue(idx, val) { searchValues[idx] = val; }
+    function removeValue(idx) { searchValues.splice(idx, 1); renderSearchValues(); }
+
+    async function generateAiQueries() {
+      const topic = document.getElementById('target-topic').value.trim() || 'AI ML Engineer';
+      const btn = document.getElementById('btn-gen-queries');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const res = await fetch('/api/suggest-queries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic })
+        });
+        const data = await res.json();
+        if (data.queries && data.queries.length) {
+          searchValues = data.queries;
+          renderSearchValues();
+          toast(`Generated ${searchValues.length} search queries`, 'success');
+        }
+      } catch (err) {
+        toast('Error: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '✨ AI Generate 10 Values';
+      }
+    }
+
+    let currentRunFoundContacts = [];
+    let foundEmailsDropdownOpen = true;
+
+    function toggleFoundEmailsDropdown() {
+      const list = document.getElementById('found-emails-list');
+      const icon = document.getElementById('found-dropdown-icon');
+      const hint = document.getElementById('found-dropdown-action-hint');
+      if (!list) return;
+
+      foundEmailsDropdownOpen = !foundEmailsDropdownOpen;
+      if (foundEmailsDropdownOpen) {
+        list.style.display = 'flex';
+        if (icon) icon.textContent = '▼';
+        if (hint) hint.textContent = 'Click to collapse';
+      } else {
+        list.style.display = 'none';
+        if (icon) icon.textContent = '▶';
+        if (hint) hint.textContent = 'Click to expand';
+      }
+    }
+
+    function renderFoundEmailsDropdown(items) {
+      const wrap = document.getElementById('found-emails-dropdown-wrap');
+      const list = document.getElementById('found-emails-list');
+      const pill = document.getElementById('found-emails-count-pill');
+      if (!wrap || !list) return;
+
+      wrap.style.display = 'block';
+      const count = items ? items.length : 0;
+      if (pill) pill.textContent = `${count} New`;
+
+      if (count === 0) {
+        list.innerHTML = `
+          <div style="background: #080c16; border: 1px dashed #374151; padding: 10px 12px; font-size: 12px; color: #9ca3af; text-align: center; border-radius: 6px !important;">
+            No new Gmails discovered in this run (all posts were duplicates or had no Gmails). All existing contacts in DB remain safe in Pending.
+          </div>
+        `;
+        return;
+      }
+
+      list.innerHTML = items.map((c, i) => {
+        const em = c.email || c.hr_email || '';
+        const nm = c.name || 'Recruiter';
+        const query = c.query || '';
+        const title = c.title || 'Talent Acquisition / HR';
+        const postSnippet = c.post_text ? c.post_text.substring(0, 140) + '...' : '';
+
+        return `
+          <div style="background: #080c16; border: 1px solid #263348; padding: 9px 12px; display: flex; flex-direction: column; gap: 5px; border-radius: 6px !important;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 7px; min-width: 0;">
+                <span style="font-weight: 700; font-size: 13px; color: #ffffff;" title="${esc(nm)}">${esc(nm)}</span>
+                <span style="font-size: 9.5px; background: rgba(234, 179, 8, 0.1); border: 1px solid #eab308; color: #facc15; padding: 1px 6px; font-weight: 700; border-radius: 4px !important;">Pending in DB</span>
+                ${c.linkedin_url ? `<a href="${esc(c.linkedin_url)}" target="_blank" class="linkedin-link" title="LinkedIn Profile" style="font-size: 11px;">in</a>` : ''}
+              </div>
+              <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
+                <button class="btn btn-xs" onclick="copyEmail('${esc(em)}', this)" title="Copy Gmail" style="background: #000000; border: 1px solid #4b5563; color: #ffffff; padding: 3px 8px; font-size: 11px; border-radius: 4px !important;">📋 Copy</button>
+                <button class="btn btn-xs btn-pending" onclick="draftForContact('${esc(em)}', this)" title="Draft tailored cold email" style="padding: 3px 9px; font-size: 11px; border-radius: 4px !important;">⚡ Draft</button>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px;">
+              <span style="font-family: 'Fira Code', monospace; color: #93c5fd; font-weight: 600;">${esc(em)}</span>
+              ${query ? `<span style="font-size: 10.5px; color: #6b7280; white-space: nowrap;">Query: <em>"${esc(query)}"</em></span>` : ''}
+            </div>
+
+            ${postSnippet ? `<div style="font-size: 11px; color: #9ca3af; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(c.post_text)}">${esc(postSnippet)}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function startScrapeWithValues() {
+      const btn = document.getElementById('btn-scrape-all');
+      const btnStop = document.getElementById('btn-stop-scrape');
+      const btnStopInline = document.getElementById('btn-stop-inline');
+      const progBox = document.getElementById('scrape-progress-box');
+      const progBar = document.getElementById('prog-bar');
+      const progPct = document.getElementById('prog-pct');
+      const progTitle = document.getElementById('prog-title');
+      const progStatus = document.getElementById('prog-status');
+      const progFound = document.getElementById('prog-found');
+      const progPulse = document.getElementById('prog-pulse');
+
+      btn.disabled = true;
+      btn.textContent = 'Searching...';
+      btnStop.style.display = 'inline-flex';
+      btnStopInline.style.display = 'inline-flex';
+      progBox.style.display = 'block';
+      progBar.style.width = '5%';
+      progPct.textContent = '5%';
+      progPct.style.color = '#ffffff';
+      progTitle.textContent = `Searching (${searchValues.length} queries)...`;
+      progStatus.textContent = 'Connecting to Chrome session...';
+      progFound.textContent = '0 New Contacts';
+      if (progPulse) progPulse.style.display = 'inline-block';
+
+      // Reset found contacts dropdown for this run
+      currentRunFoundContacts = [];
+      const foundWrap = document.getElementById('found-emails-dropdown-wrap');
+      const foundList = document.getElementById('found-emails-list');
+      const foundCountPill = document.getElementById('found-emails-count-pill');
+      if (foundWrap) foundWrap.style.display = 'none';
+      if (foundList) foundList.innerHTML = '';
+      if (foundCountPill) foundCountPill.textContent = '0 New';
+
+      let lastSeenNew = 0;
+      const pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch('/api/scrape-status');
+          const st = await res.json();
+          if (st.is_running) {
+            progBar.style.width = `${st.percent}%`;
+            progPct.textContent = `${st.percent}%`;
+            progPct.style.color = '#ffffff';
+            progTitle.textContent = `Query ${st.current_query_index} of ${st.total_queries}`;
+            progStatus.textContent = st.status_text || 'Scraping feed...';
+            progFound.textContent = `${st.found_count || 0} New Contacts`;
+            // If stop was requested, dim the pulse
+            if (st.stop_requested && progPulse) {
+              progPulse.style.opacity = '0.3';
+            }
+            if (st.new_contacts && st.new_contacts.length > 0) {
+              currentRunFoundContacts = st.new_contacts;
+              renderFoundEmailsDropdown(currentRunFoundContacts);
+            }
+            if (st.found_count !== lastSeenNew) {
+              lastSeenNew = st.found_count;
+              await loadContacts();
+            }
+          }
+        } catch (e) {}
+      }, 1000);
+
+      try {
+        const res = await fetch('/api/scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queries: searchValues, max_posts: 15 })
+        });
+        const data = await res.json();
+
+        if (data.ok) {
+          progBar.style.width = '100%';
+          progPct.textContent = '100%';
+          progPct.style.color = '#4ade80';
+          progTitle.textContent = `Done (✓)`;
+          progStatus.textContent = `Collected ${data.new_count || 0} new contacts (${data.count || 0} total saved)`;
+          progFound.textContent = `+${data.new_count || 0} New Contacts`;
+          if (data.new_contacts) {
+            currentRunFoundContacts = data.new_contacts;
+          }
+          renderFoundEmailsDropdown(currentRunFoundContacts);
+          toast(`Collected ${data.new_count || 0} new contacts!`, 'success');
+        } else {
+          throw new Error(data.error || 'Scrape failed');
+        }
+        await loadContacts();
+        await checkDbStatus();
+      } catch (err) {
+        toast('Scrape error: ' + err.message, 'error');
+        progStatus.textContent = 'Error: ' + err.message;
+        progPct.style.color = '#ef4444';
+      } finally {
+        clearInterval(pollTimer);
+        btn.disabled = false;
+        btn.textContent = '🚀 Search LinkedIn for HR Gmails';
+        btnStop.style.display = 'none';
+        btnStopInline.style.display = 'none';
+        if (progPulse) { progPulse.style.opacity = '1'; }
+      }
+    }
+
+    async function stopScraping() {
+      const btnStop = document.getElementById('btn-stop-scrape');
+      const btnStopInline = document.getElementById('btn-stop-inline');
+      const progStatus = document.getElementById('prog-status');
+      try {
+        btnStop.disabled = true;
+        btnStop.textContent = 'Stopping...';
+        btnStopInline.disabled = true;
+        btnStopInline.textContent = 'Stopping...';
+        const res = await fetch('/api/scrape/stop', { method: 'POST' });
+        const data = await res.json();
+        progStatus.textContent = '⛔ Stop requested — finishing current query...';
+        toast('Stop requested. Finishing current query then stopping.', 'info');
+      } catch (e) {
+        toast('Could not send stop signal', 'error');
+      } finally {
+        btnStop.disabled = false;
+        btnStop.textContent = '⛔ Stop';
+        btnStopInline.disabled = false;
+        btnStopInline.textContent = '⛔ Stop';
+      }
+    }
+
+    async function loadProfile() {
+      const res = await fetch('/api/profile');
+      profile = await res.json();
+      if (profile.resume_filename) {
+        document.getElementById('resume-filename').textContent = 'Attached: ' + profile.resume_filename;
+      }
+    }
+
+    async function loadContacts() {
+      try {
+        const [resPending, resSent] = await Promise.all([
+          fetch('/api/contacts?filter=pending_gmail'),
+          fetch('/api/contacts?filter=sent')
+        ]);
+        contacts = await resPending.json();
+        sentEmails = await resSent.json();
+
+        const countPendingEl = document.getElementById('count-pending');
+        if (countPendingEl) countPendingEl.textContent = contacts.length;
+
+        const countSentEl = document.getElementById('count-sent');
+        if (countSentEl) countSentEl.textContent = sentEmails.length;
+
+        updateCountOptions();
+        renderContacts();
+      } catch (e) {
+        console.error('Error loading contacts', e);
+      }
+    }
+
+    function updateCountOptions() {
+      const select = document.getElementById('apply-count');
+      if (!select) return;
+      const total = contacts.length;
+      if (total === 0) {
+        select.innerHTML = `<option value="0">0 leads</option>`;
+        return;
+      }
+      const c10 = Math.max(1, Math.round(total * 0.10));
+      const c20 = Math.max(1, Math.round(total * 0.20));
+      const c50 = Math.max(1, Math.round(total * 0.50));
+      const currentVal = select.value;
+
+      select.innerHTML = `
+        <option value="${c10}">10% (${c10} leads)</option>
+        <option value="${c20}" selected>20% (${c20} leads)</option>
+        <option value="${c50}">50% (${c50} leads)</option>
+        <option value="${total}">100% (All ${total} leads)</option>
+      `;
+
+      if ([String(c10), String(c20), String(c50), String(total)].includes(currentVal)) {
+        select.value = currentVal;
+      }
+    }
+
+    function setSidebarView(view) {
+      sidebarView = view;
+      const tabPending = document.getElementById('tab-pending');
+      const tabSent = document.getElementById('tab-sent');
+      if (tabPending) tabPending.classList.toggle('active', view === 'pending');
+      if (tabSent) tabSent.classList.toggle('active', view === 'sent');
+
+      const searchInput = document.getElementById('contact-search');
+      if (searchInput) {
+        searchInput.placeholder = view === 'pending' ? 'Search pending Gmails...' : 'Search sent emails...';
+      }
+
+      const clearBtn = document.getElementById('btn-clear-contacts');
+      if (clearBtn) {
+        clearBtn.style.display = view === 'pending' ? 'inline-flex' : 'none';
+      }
+
+      renderContacts();
+    }
+
+    function formatTime(isoStr) {
+      if (!isoStr) return '';
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return '';
+        const diffHours = Math.floor((new Date() - d) / 3600000);
+        if (diffHours < 1) return 'Just now';
+        if (diffHours < 24) return `${diffHours}h ago`;
+        const diffDays = Math.floor(diffHours / 24);
+        if (diffDays === 1) return 'Yesterday';
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function getFilteredContacts() {
+      const sourceList = (sidebarView === 'sent') ? sentEmails : contacts;
+      return sourceList.filter(c => {
+        const email = (c.email || c.hr_email || c.gmail || '').toLowerCase();
+        if (sidebarView === 'pending') {
+          if (!email.includes('@gmail.com') || c.is_applied || c.status === 'sent') return false;
+        }
+
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          const name = (c.name || '').toLowerCase();
+          const title = (c.title || '').toLowerCase();
+          const post = (c.post_text || '').toLowerCase();
+          const subject = (c.subject || '').toLowerCase();
+          if (!email.includes(q) && !name.includes(q) && !title.includes(q) && !post.includes(q) && !subject.includes(q)) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    function renderContacts() {
+      const listContainer = document.getElementById('contacts-list');
+      const visible = getFilteredContacts();
+
+      const countBadge = document.getElementById('contacts-count-badge');
+      if (countBadge) countBadge.textContent = `${contacts.length} Pending | ${sentEmails.length} Sent`;
+
+      const copyCount = document.getElementById('copy-count');
+      if (copyCount) copyCount.textContent = visible.length;
+
+      const countPendingEl = document.getElementById('count-pending');
+      if (countPendingEl) countPendingEl.textContent = contacts.length;
+
+      const countSentEl = document.getElementById('count-sent');
+      if (countSentEl) countSentEl.textContent = sentEmails.length;
+
+      if (!visible.length) {
+        if (sidebarView === 'pending') {
+          listContainer.innerHTML = `
+            <div class="empty-contacts-state">
+              <div style="font-size:24px; opacity:0.6;">📬</div>
+              <div style="font-weight:500; font-size:13px; color:var(--text);">No Pending Gmails</div>
+              <div style="font-size:11.5px;">All leads applied or click "Search LinkedIn" on the left to discover new Gmails.</div>
+            </div>
+          `;
+        } else {
+          listContainer.innerHTML = `
+            <div class="empty-contacts-state">
+              <div style="font-size:24px; opacity:0.6;">✓</div>
+              <div style="font-weight:500; font-size:13px; color:var(--text);">No Sent Emails Found</div>
+              <div style="font-size:11.5px;">Sent emails will appear here with confirmation timestamps and subjects.</div>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      if (sidebarView === 'sent') {
+        // Render validated sent records
+        listContainer.innerHTML = visible.map((c, i) => {
+          const email = c.email || c.hr_email || c.gmail || '';
+          const name = c.name && c.name !== 'Unknown' ? c.name : 'Recruiter';
+          const title = c.title || 'Talent Acquisition / HR';
+          const sentTime = formatTime(c.sent_at || c.updated_at);
+          const fullSentDate = c.sent_at ? new Date(c.sent_at).toLocaleString() : '';
+          const subject = c.subject || 'Application Sent';
+
+          return `
+            <div class="contact-card sent-card" id="sent-${i}">
+              <div class="contact-card-top">
+                <div class="contact-name-row">
+                  <span class="contact-name" title="${esc(name)}">${esc(name)}</span>
+                  ${c.linkedin_url ? `<a href="${esc(c.linkedin_url)}" target="_blank" class="linkedin-link" title="LinkedIn Profile">in</a>` : ''}
+                </div>
+                <div class="contact-meta-top">
+                  <span class="sent-badge-pill" title="Sent: ${esc(fullSentDate)}">✓ Sent</span>
+                  ${sentTime ? `<span class="time-badge" title="${esc(fullSentDate)}">${sentTime}</span>` : ''}
+                </div>
+              </div>
+
+              <div class="email-box" style="border-color: rgba(16, 185, 129, 0.25);">
+                <span class="email-address-text" style="color: #34d399;" title="${esc(email)}">${esc(email)}</span>
+                <button class="btn-copy-email" onclick="copyEmail('${esc(email)}', this)" title="Copy email">Copy</button>
+              </div>
+
+              <div class="post-snippet" style="color: var(--text-muted);" title="Subject: ${esc(subject)}">
+                <strong style="color: var(--text-dim);">Subject:</strong> ${esc(subject)}
+              </div>
+
+              <div class="contact-actions" style="margin-top: 2px;">
+                <span class="contact-title-compact" title="${esc(title)}">${esc(title)}</span>
+                <span style="font-size: 10px; color: #10b981; font-weight: 500;">✓ In DB</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } else {
+        // Render pending Gmail leads
+        listContainer.innerHTML = visible.map((c, i) => {
+          const email = c.email || c.hr_email || c.gmail || '';
+          const name = c.name && c.name !== 'Unknown' ? c.name : 'Recruiter';
+          const title = c.title || 'Talent Acquisition / HR';
+          const post = c.post_text ? c.post_text.trim() : '';
+          const timeAgo = formatTime(c.created_at);
+
+          return `
+            <div class="contact-card" id="contact-${i}">
+              <div class="contact-card-top">
+                <div class="contact-name-row">
+                  <span class="contact-name" title="${esc(name)}">${esc(name)}</span>
+                  ${c.linkedin_url ? `<a href="${esc(c.linkedin_url)}" target="_blank" class="linkedin-link" title="LinkedIn Profile">in</a>` : ''}
+                </div>
+                <div class="contact-meta-top">
+                  ${timeAgo ? `<span class="time-badge">${timeAgo}</span>` : ''}
+                  <button class="btn-dismiss" onclick="deleteSingleContact('${esc(email)}')" title="Dismiss lead">✕</button>
+                </div>
+              </div>
+
+              <div class="email-box">
+                <span class="email-address-text" title="${esc(email)}">${esc(email)}</span>
+                <button class="btn-copy-email" onclick="copyEmail('${esc(email)}', this)" title="Copy email">Copy</button>
+              </div>
+
+              ${post ? `<div class="post-snippet" title="${esc(post)}">${esc(post)}</div>` : ''}
+
+              <div class="contact-actions">
+                <span class="contact-title-compact" title="${esc(title)}">${esc(title)}</span>
+                ${(() => {
+                  const hasDraft = drafts.some(d => (d.to_email || '').toLowerCase().trim() === email.toLowerCase().trim());
+                  if (hasDraft) {
+                    return `
+                      <button class="btn btn-xs btn-draft-compact btn-success" 
+                              onclick="scrollToDraft('${esc(email)}')" 
+                              title="Draft ready. Click to view in drafts window.">
+                        ✓ Drafted
+                      </button>
+                    `;
+                  }
+                  return `
+                    <button class="btn btn-xs btn-draft-compact btn-pending" 
+                            onclick="draftForContact('${esc(email)}', this)" 
+                            title="Draft tailored cold email">
+                      ⚡ Draft
+                    </button>
+                  `;
+                })()}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function onContactSearch(val) {
+      searchQuery = val.trim();
+      document.getElementById('search-clear').style.display = searchQuery ? 'block' : 'none';
+      renderContacts();
+    }
+
+    function clearContactSearch() {
+      document.getElementById('contact-search').value = '';
+      searchQuery = '';
+      document.getElementById('search-clear').style.display = 'none';
+      renderContacts();
+    }
+
+    function copyEmail(email, btn) {
+      navigator.clipboard.writeText(email);
+      if (btn) {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✓ Copied';
+        btn.style.color = '#10b981';
+        setTimeout(() => {
+          btn.innerHTML = orig;
+          btn.style.color = '';
+        }, 1500);
+      }
+      toast(`Copied: ${email}`, 'success');
+    }
+
+    function copyAllEmails() {
+      const visible = getFilteredContacts();
+      const emails = visible.map(c => c.email || c.hr_email || c.gmail).filter(Boolean);
+      const label = sidebarView === 'sent' ? 'sent' : 'pending';
+      if (!emails.length) {
+        toast(`No ${label} emails to copy`, 'info');
+        return;
+      }
+      navigator.clipboard.writeText(emails.join(', '));
+      toast(`Copied ${emails.length} ${label} emails`, 'success');
+    }
+
+    function exportContactsCSV() {
+      const visible = getFilteredContacts();
+      const label = sidebarView === 'sent' ? 'sent' : 'pending';
+      if (!visible.length) {
+        toast(`No ${label} emails to export`, 'info');
+        return;
+      }
+      const headers = ['Name', 'Title', 'Email', sidebarView === 'sent' ? 'Sent_At' : 'Created_At', 'Subject', 'LinkedIn_URL'];
+      const rows = visible.map(c => [
+        `"${(c.name || '').replace(/"/g, '""')}"`,
+        `"${(c.title || '').replace(/"/g, '""')}"`,
+        `"${(c.email || c.hr_email || c.gmail || '').replace(/"/g, '""')}"`,
+        `"${((sidebarView === 'sent' ? (c.sent_at || c.updated_at) : c.created_at) || '').replace(/"/g, '""')}"`,
+        `"${(c.subject || '').replace(/"/g, '""')}"`,
+        `"${(c.linkedin_url || '').replace(/"/g, '""')}"`
+      ]);
+      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', sidebarView === 'sent' ? 'sent_emails.csv' : 'pending_gmails.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast(`Exported ${visible.length} ${label} emails to CSV`, 'success');
+    }
+
+    async function deleteSingleContact(email) {
+      try {
+        const res = await fetch('/api/contacts/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          toast(`Dismissed ${email}`, 'info');
+          await loadContacts();
+          await checkDbStatus();
+        }
+      } catch (e) {
+        toast('Error deleting contact', 'error');
+      }
+    }
+
+    async function clearAllContactsPrompt() {
+      const visible = getFilteredContacts();
+      if (!visible.length) return;
+      if (!confirm(`Clear all ${visible.length} pending Gmail contacts? Sent history will be kept.`)) return;
+      try {
+        await fetch('/api/contacts/clear', { method: 'POST' });
+        toast('Cleared pending contacts', 'info');
+        await loadContacts();
+        await checkDbStatus();
+      } catch (e) {
+        toast('Error clearing contacts', 'error');
+      }
+    }
+
+    function scrollToDraft(email) {
+      const clean = (email || '').toLowerCase().trim();
+      const idx = drafts.findIndex(d => (d.to_email || '').toLowerCase().trim() === clean);
+      if (idx !== -1) {
+        const card = document.getElementById(`draft-${idx}`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.style.transition = 'all 0.3s ease';
+          card.style.boxShadow = '0 0 0 2px #eab308, 0 8px 24px rgba(234, 179, 8, 0.35)';
+          setTimeout(() => { card.style.boxShadow = ''; }, 2400);
+          toast(`Viewing draft for ${clean}`, 'info');
+          return;
+        }
+      }
+      toast(`No active draft found for ${clean}`, 'info');
+    }
+
+    async function draftForContact(email, btn) {
+      let c = contacts.find(x => (x.email || x.hr_email || x.gmail) === email);
+      if (!c && typeof currentRunFoundContacts !== 'undefined' && currentRunFoundContacts.length) {
+        c = currentRunFoundContacts.find(x => (x.email || x.hr_email || x.gmail) === email);
+      }
+      if (!c) return;
+      const cleanEmail = (c.email || c.hr_email || c.gmail || '').trim();
+      const selectedModel = document.getElementById('ai-model-select') ? document.getElementById('ai-model-select').value : 'qwen/qwen3.8-27b';
+      
+      let origHtml = '⚡ Draft';
+      if (btn) {
+        origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Drafting...';
+      }
+      toast(`Drafting tailored email for ${c.name || cleanEmail}...`, 'info');
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name,
+            title: c.title,
+            post_text: c.post_text,
+            hr_email: cleanEmail,
+            model: selectedModel
+          })
+        });
+        const data = await res.json();
+        if (data.body) {
+          await fetch('/api/save-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to_email: cleanEmail,
+              to_name: data.resolved_name || c.resolved_name || c.name,
+              subject: data.subject,
+              body: data.body,
+              status: 'draft',
+              fit: data.fit || null
+            })
+          });
+          await loadDrafts();
+          renderContacts();
+          toast(`Draft created for ${c.name || cleanEmail}!`, 'success');
+          // Scroll immediately to newly created draft and highlight it
+          scrollToDraft(cleanEmail);
+        } else if (data.error) {
+          toast(`Draft failed: ${data.error}`, 'error');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+          }
+        }
+      } catch (e) {
+        toast('Error: ' + e.message, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+      }
+    }
+
+    let draftSortMode = 'score';
+
+    async function changeDraftSort(mode) {
+      draftSortMode = mode;
+      await loadDrafts();
+    }
+
+    async function loadDrafts() {
+      try {
+        const res = await fetch(`/api/emails?sort=${draftSortMode}`);
+        const all = await res.json();
+        // Cross-verify: strictly filter out any email already sent in database
+        const sentSet = new Set((sentEmails || []).map(s => (s.email || '').toLowerCase().trim()));
+        drafts = (all || []).filter(d => {
+          const em = (d.to_email || '').toLowerCase().trim();
+          return d.status !== 'sent' && !sentSet.has(em);
+        });
+        renderDrafts();
+        renderContacts();
+      } catch (e) {
+        console.error('Error loading drafts', e);
+      }
+    }
+
+    async function uploadResume(input) {
+      if (!input.files || !input.files[0]) return;
+      const formData = new FormData();
+      formData.append('resume', input.files[0]);
+      toast('Analyzing resume...', 'info');
+
+      try {
+        const res = await fetch('/api/upload-resume', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.ok) {
+          toast(`Resume attached!`, 'success');
+          document.getElementById('resume-filename').textContent = 'Attached: ' + data.filename;
+          await loadProfile();
+          renderDrafts();
+        }
+      } catch (e) {
+        toast('Upload failed: ' + e.message, 'error');
+      }
+    }
+
+    function stopDrafting() {
+      stopDraftingRequested = true;
+      const btnStop = document.getElementById('btn-stop-drafts');
+      if (btnStop) {
+        btnStop.disabled = true;
+        btnStop.textContent = 'Stopping...';
+      }
+      toast('Stopping batch generation after current lead...', 'info');
+    }
+
+    async function generateBatchDrafts() {
+      const sentSet = new Set((sentEmails || []).map(s => (s.email || '').toLowerCase().trim()));
+      // Contacts that haven't been applied to
+      const unappliedContacts = contacts.filter(c => {
+        const em = (c.email || c.hr_email || c.gmail || '').toLowerCase().trim();
+        return !c.is_applied && c.status !== 'sent' && !sentSet.has(em);
+      });
+
+      if (!unappliedContacts.length) {
+        toast('All pending Gmail contacts have already been applied to!', 'info');
+        return;
+      }
+
+      // Filter out contacts that already have a draft in drafts
+      const existingDraftEmails = new Set(drafts.map(d => (d.to_email || '').toLowerCase().trim()));
+      const candidates = unappliedContacts.filter(c => {
+        const em = (c.email || c.hr_email || c.gmail || '').toLowerCase().trim();
+        return !existingDraftEmails.has(em);
+      });
+
+      if (!candidates.length) {
+        toast(`All ${unappliedContacts.length} pending contacts already have drafts ready below!`, 'info');
+        return;
+      }
+
+      const countSelect = document.getElementById('apply-count');
+      const requestedVal = countSelect.value;
+      let requestedCount = parseInt(requestedVal, 10);
+      if (isNaN(requestedCount)) {
+        if (requestedVal === '10pct') requestedCount = Math.max(1, Math.round(unappliedContacts.length * 0.10));
+        else if (requestedVal === '20pct') requestedCount = Math.max(1, Math.round(unappliedContacts.length * 0.20));
+        else if (requestedVal === '50pct') requestedCount = Math.max(1, Math.round(unappliedContacts.length * 0.50));
+        else requestedCount = candidates.length;
+      }
+
+      const limit = Math.min(requestedCount, candidates.length);
+      const targetContacts = candidates.slice(0, limit);
+      const selectedModel = document.getElementById('ai-model-select') ? document.getElementById('ai-model-select').value : 'qwen/qwen3.8-27b';
+
+      const btn = document.getElementById('btn-gen-drafts');
+      const btnStop = document.getElementById('btn-stop-drafts');
+      btn.disabled = true;
+      stopDraftingRequested = false;
+
+      if (btnStop) {
+        btnStop.style.display = 'inline-flex';
+        btnStop.disabled = false;
+        btnStop.textContent = '⛔ Stop';
+      }
+
+      let countSuccess = 0;
+      for (let i = 0; i < targetContacts.length; i++) {
+        if (stopDraftingRequested) {
+          break;
+        }
+
+        const c = targetContacts[i];
+        const cleanEmail = c.email || c.hr_email || c.gmail;
+        btn.textContent = `⚡ Drafting ${i + 1}/${targetContacts.length}...`;
+        try {
+          const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: c.name,
+              title: c.title,
+              post_text: c.post_text,
+              hr_email: cleanEmail,
+              model: selectedModel
+            })
+          });
+          const data = await res.json();
+          if (data.body) {
+            const matchFilter = document.getElementById('match-filter') ? document.getElementById('match-filter').value : 'all';
+            if (matchFilter === 'skip_gaps' && data.fit && data.fit.dealbreaker) {
+              console.log(`Skipping draft for ${cleanEmail} due to dealbreaker: ${data.fit.dealbreaker}`);
+              continue;
+            }
+            if (matchFilter === 'strong_only' && data.fit && (data.fit.fit_score || 0) < 70) {
+              console.log(`Skipping draft for ${cleanEmail} due to low match score: ${data.fit.fit_score}%`);
+              continue;
+            }
+
+            await fetch('/api/save-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to_email: cleanEmail,
+                to_name: data.resolved_name || c.resolved_name || c.name,
+                subject: data.subject,
+                body: data.body,
+                status: 'draft',
+                fit: data.fit || null
+              })
+            });
+            countSuccess++;
+            // Live update drafts list as each draft finishes so user sees progress in real time!
+            await loadDrafts();
+            renderContacts();
+          }
+        } catch (e) {
+          console.error(e);
+        }
+
+        if (stopDraftingRequested) {
+          break;
+        }
+      }
+
+      btn.disabled = false;
+      btn.textContent = '⚡ Generate Drafts';
+      if (btnStop) {
+        btnStop.style.display = 'none';
+        btnStop.disabled = false;
+        btnStop.textContent = '⛔ Stop';
+      }
+
+      if (stopDraftingRequested) {
+        toast(`Stopped drafting early! ${countSuccess} new drafts ready for review below.`, 'info');
+      } else {
+        toast(`Generated ${countSuccess} tailored drafts!`, 'success');
+      }
+      stopDraftingRequested = false;
+      await loadDrafts();
+      renderContacts();
+    }
+
+    async function regenerateDraft(idx) {
+      const d = drafts[idx];
+      const c = contacts.find(x => (x.hr_email || x.gmail) === d.to_email) || {
+        name: d.to_name,
+        title: '',
+        post_text: '',
+        hr_email: d.to_email
+      };
+
+      const selectedModel = document.getElementById('ai-model-select') ? document.getElementById('ai-model-select').value : 'qwen/qwen3.8-27b';
+      toast(`Regenerating draft for ${d.to_name || d.to_email}...`, 'info');
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name || d.to_name,
+            title: c.title || '',
+            post_text: c.post_text || '',
+            hr_email: d.to_email,
+            model: selectedModel
+          })
+        });
+        const data = await res.json();
+        if (data.body) {
+          d.subject = data.subject;
+          d.body = data.body;
+          await fetch('/api/save-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(d)
+          });
+          renderDrafts();
+          toast(`Draft updated!`, 'success');
+        }
+      } catch (e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+
+    async function deleteSingleDraft(toEmail) {
+      try {
+        const res = await fetch('/api/emails/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_email: toEmail })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          toast(`Dismissed draft for ${toEmail}`, 'info');
+          await loadDrafts();
+          renderContacts();
+        }
+      } catch (e) {
+        toast('Error dismissing draft', 'error');
+      }
+    }
+
+    async function clearAllDraftsPrompt() {
+      if (!drafts.length) {
+        toast('No active drafts to clear.', 'info');
+        return;
+      }
+      if (!confirm(`Clear all ${drafts.length} generated drafts? (Your contacts and sent email history will be kept safe).`)) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/emails/clear', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          toast(`Cleared all ${drafts.length} drafts.`, 'info');
+          await loadDrafts();
+          renderContacts();
+        }
+      } catch (e) {
+        toast('Error clearing drafts: ' + e.message, 'error');
+      }
+    }
+
+    function renderDrafts() {
+      const container = document.getElementById('drafts-container');
+      const countBadge = document.getElementById('apply-all-count');
+      if (countBadge) countBadge.textContent = drafts.length;
+
+      const reviewBadge = document.getElementById('review-drafts-count');
+      if (reviewBadge) reviewBadge.textContent = drafts.length;
+
+      const clearCount = document.getElementById('clear-drafts-count');
+      if (clearCount) clearCount.textContent = drafts.length;
+
+      const tailorCount = document.getElementById('tailor-all-count');
+      if (tailorCount) tailorCount.textContent = drafts.length;
+
+      const btnTailorAll = document.getElementById('btn-tailor-all-resumes');
+      if (btnTailorAll) {
+        btnTailorAll.disabled = drafts.length === 0;
+      }
+
+      const btnClear = document.getElementById('btn-clear-all-drafts');
+      if (btnClear) {
+        btnClear.disabled = drafts.length === 0;
+      }
+
+      const btnApplyAll = document.getElementById('btn-apply-all');
+      if (btnApplyAll) {
+        btnApplyAll.disabled = drafts.length === 0;
+      }
+
+      if (!drafts.length) {
+        container.innerHTML = `
+          <div style="text-align:center; padding: 32px 20px; color: var(--text-dim); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);">
+            <div style="font-size:24px; margin-bottom:8px; opacity:0.8;">✉</div>
+            <div style="font-weight:600; font-size:13.5px; color:var(--text); margin-bottom:4px;">No Pending Drafts</div>
+            <div style="font-size:12px;">All drafts are cleared. Pick a count above and click <b>⚡ Generate Drafts</b>, or draft individually from the right sidebar.</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = drafts.map((d, idx) => {
+        const name = d.to_name || 'HR Recruiter';
+        const fit = d.fit || null;
+        let fitHtml = '';
+
+        if (fit && typeof fit.fit_score !== 'undefined') {
+          const score = fit.fit_score;
+          const tierClass = score >= 75 ? 'fit-strong' : (score >= 50 ? 'fit-moderate' : 'fit-poor');
+          const tierIcon = score >= 75 ? '🟢' : (score >= 50 ? '🟡' : '🔴');
+          
+          let dealbreakerHtml = '';
+          if (fit.dealbreaker) {
+            dealbreakerHtml = `<div class="dealbreaker-banner">⚠️ <b>Dealbreaker:</b> ${esc(fit.dealbreaker)}</div>`;
+          }
+
+          let tagsHtml = '';
+          const matches = (fit.matched_tags || []).map(t => `<span class="fit-tag-pill fit-tag-match">${esc(t)}</span>`).join('');
+          const misses = (fit.missing_tags || []).map(t => `<span class="fit-tag-pill fit-tag-miss">${esc(t)}</span>`).join('');
+          if (matches || misses) {
+            tagsHtml = `<div class="fit-tags-wrap">${matches}${misses}</div>`;
+          }
+
+          const hasMissingSkills = (fit.missing_tags && fit.missing_tags.length > 0);
+
+          fitHtml = `
+            <div class="fit-meta-row">
+              <div class="fit-score-bar">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span class="badge-fit-score ${tierClass}">${tierIcon} ${score}% Match</span>
+                  ${dealbreakerHtml}
+                  ${hasMissingSkills ? `
+                    <button class="btn btn-xs btn-success" onclick="quickTailorDraftSkills(${idx}, this)" style="padding: 2px 9px; font-size: 11px; font-weight: 700; background: rgba(34, 197, 94, 0.14) !important; border: 1px solid #22c55e !important; color: #4ade80 !important;" title="1-Click: Surgically injects missing skills into resume.tex Skills section ONLY and turns red tags green ✓">
+                      ⚡ Quick Sync Missing Skills
+                    </button>
+                  ` : ''}
+                </div>
+                <span style="font-size:11px; color:var(--text-dim);">${fit.evaluated_fields_count ? fit.evaluated_fields_count + ' criteria evaluated' : 'General post'}</span>
+              </div>
+              ${tagsHtml}
+            </div>
+          `;
+        }
+
+        return `
+          <div class="draft-card" id="draft-${idx}">
+            <div class="draft-header">
+              <div>
+                <div class="recip-name">${esc(name)}</div>
+                <div class="recip-email">${esc(d.to_email)}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge badge-draft">Draft</span>
+                <button class="btn-dismiss" onclick="deleteSingleDraft('${esc(d.to_email)}')" title="Dismiss draft">✕</button>
+              </div>
+            </div>
+
+            ${fitHtml}
+
+            <input type="text" class="input-box" style="font-weight:500;" value="${esc(d.subject || '')}" id="sub-${idx}" placeholder="Subject..." />
+            <textarea class="draft-body-input" id="body-${idx}">${esc(d.body || '')}</textarea>
+
+            <div class="draft-footer">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                ${d.tailored_resume_filename ? `
+                  <span class="badge" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid #22c55e; font-size:11px; padding: 2px 7px; border-radius:4px !important; cursor:pointer;" onclick="openTailorResumeModal(${idx})" title="Click to preview or edit tailored resume">
+                    ✨ Tailored Resume Attached
+                  </span>
+                ` : `
+                  <span style="font-size: 11.5px; color: var(--text-dim);">
+                    ${profile.resume_filename ? '📎 ' + esc(profile.resume_filename) : '⚠️ Master resume'}
+                  </span>
+                `}
+                <button class="btn btn-xs btn-pending" onclick="quickTailorDraftSkills(${idx}, this)" style="padding: 2px 8px; font-size: 11px;" title="1-Click: Sync missing skills into resume.tex skills block only">
+                  ⚡ Quick Sync Skills
+                </button>
+                <button class="btn btn-xs btn-secondary" onclick="openTailorResumeModal(${idx})" style="padding: 2px 8px; font-size: 11px;" title="Preview PDF and tailor resume for this lead">
+                  🎯 ${d.tailored_resume_filename ? 'Preview / Edit Resume' : 'Full Tailor & Preview'}
+                </button>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button class="btn btn-xs btn-secondary" onclick="regenerateDraft(${idx})" title="Regenerate draft">
+                  🔄 Re-draft
+                </button>
+                <button class="btn btn-xs btn-success" onclick="sendSingleDraft(${idx})">
+                  ✉ Send
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Auto-size all draft textareas to display 100% of email content without internal scrollbars
+      requestAnimationFrame(() => {
+        container.querySelectorAll('.draft-body-input').forEach(el => {
+          el.style.height = 'auto';
+          el.style.height = Math.max(190, el.scrollHeight + 10) + 'px';
+          el.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight + 10) + 'px';
+          });
+        });
+      });
+    }
+
+    async function sendSingleDraft(idx) {
+      const d = drafts[idx];
+      if (!d || d.status === 'sent') {
+        toast('Already sent!', 'info');
+        return;
+      }
+
+      if (d.fit && d.fit.dealbreaker) {
+        if (!confirm(`⚠️ Dealbreaker Warning for ${d.to_email}:\n\n${d.fit.dealbreaker}\n\nSending an email for this senior/mismatched requirement could cause a negative impression. Send anyway?`)) {
+          return;
+        }
+      }
+
+      const card = document.getElementById(`draft-${idx}`);
+      const sendBtn = card ? card.querySelector('.btn-success') : null;
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '⏳ Sending...';
+      }
+
+      const sub = document.getElementById(`sub-${idx}`).value;
+      const body = document.getElementById(`body-${idx}`).value;
+
+      try {
+        const res = await fetch('/api/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: d.to_email,
+            subject: sub,
+            body: body,
+            to_name: d.to_name,
+            tailored_resume_filename: d.tailored_resume_filename || ''
+          })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+
+        toast(`Sent to ${d.to_email}!`, 'success');
+        d.status = 'sent';
+        await loadDrafts();
+        await loadContacts();
+        await checkDbStatus();
+      } catch (err) {
+        toast('Send failed: ' + err.message, 'error');
+        if (sendBtn) {
+          sendBtn.disabled = false;
+          sendBtn.innerHTML = '✉ Send';
+        }
+      }
+    }
+
+    // ── Tailor Resume & Preview Modal Handlers ────────────────────────────────
+    let activeTailorDraftIdx = null;
+    let currentTailoredTex = '';
+    let currentTailoredFilename = '';
+    let isLatexEditorMode = false;
+
+    async function openTailorResumeModal(draftIdx) {
+      activeTailorDraftIdx = draftIdx;
+      const d = drafts[draftIdx];
+      if (!d) return;
+
+      const c = contacts.find(x => (x.hr_email || x.gmail) === d.to_email) || {
+        name: d.to_name,
+        title: '',
+        post_text: ''
+      };
+
+      const recipInfo = document.getElementById('tailor-recip-info');
+      if (recipInfo) {
+        recipInfo.textContent = `Recipient: ${d.to_name || 'HR Recruiter'} (${d.to_email})`;
+      }
+
+      const snippetEl = document.getElementById('tailor-post-snippet');
+      if (snippetEl) {
+        snippetEl.textContent = c.post_text || '(No additional post snippet recorded)';
+      }
+
+      const feedbackInput = document.getElementById('tailor-feedback-input');
+      if (feedbackInput) feedbackInput.value = '';
+
+      // Reset tabs to feedback view
+      isLatexEditorMode = false;
+      document.getElementById('tailor-feedback-panel').style.display = 'flex';
+      document.getElementById('tailor-editor-panel').style.display = 'none';
+      document.getElementById('btn-toggle-editor').textContent = '📝 Edit Raw LaTeX';
+
+      // Populate missing skills chips in modal
+      populateModalMissingChips(d);
+
+      // Ensure spinner is hidden initially
+      const spinner = document.getElementById('tailor-loading-spinner');
+      if (spinner) spinner.style.display = 'none';
+
+      // Open Modal
+      document.getElementById('modal-tailor-resume').classList.add('open');
+
+      // Hook iframe onload to auto-hide spinner whenever PDF stream renders
+      const iframe = document.getElementById('tailor-pdf-iframe');
+      if (iframe) {
+        iframe.onload = () => {
+          const sp = document.getElementById('tailor-loading-spinner');
+          if (sp) sp.style.display = 'none';
+        };
+      }
+
+      // If draft already has tailored resume, show it immediately
+      if (d.tailored_resume_filename) {
+        currentTailoredFilename = d.tailored_resume_filename;
+        currentTailoredTex = d.tailored_tex || '';
+        const pdfUrl = `/api/resume/pdf/${d.tailored_resume_filename}?t=${Date.now()}`;
+        if (iframe) iframe.src = pdfUrl;
+        document.getElementById('tailor-pdf-link').href = pdfUrl;
+        if (currentTailoredTex) {
+          document.getElementById('tailor-raw-tex').value = currentTailoredTex;
+        } else {
+          fetch('/api/resume/base-tex').then(r => r.json()).then(data => {
+            if (data.tex) {
+              currentTailoredTex = data.tex;
+              document.getElementById('tailor-raw-tex').value = data.tex;
+            }
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      // If no tailored resume yet, show master resume instantly without blocking
+      const masterUrl = `/api/resume/pdf/resume_master.pdf?t=${Date.now()}`;
+      if (iframe) iframe.src = masterUrl;
+      document.getElementById('tailor-pdf-link').href = masterUrl;
+      fetch('/api/resume/base-tex').then(r => r.json()).then(data => {
+        if (data.tex) {
+          currentTailoredTex = data.tex;
+          document.getElementById('tailor-raw-tex').value = data.tex;
+        }
+      }).catch(() => {});
+    }
+
+    function populateModalMissingChips(d) {
+      const chipsContainer = document.getElementById('tailor-modal-missing-chips');
+      if (!chipsContainer) return;
+      const fit = d ? d.fit : null;
+      const misses = (fit && fit.missing_tags) ? fit.missing_tags : [];
+      const matches = (fit && fit.matched_tags) ? fit.matched_tags : [];
+      
+      if (misses.length > 0) {
+        chipsContainer.innerHTML = misses.map(m => `<span class="fit-tag-pill fit-tag-miss" style="font-size:11px; padding:3px 8px; font-weight:700;">${esc(m)}</span>`).join('');
+      } else if (matches.length > 0) {
+        chipsContainer.innerHTML = `<span style="font-size:11px; color:#4ade80; font-weight:700;">✓ All required skills matched in resume:</span> ` + 
+          matches.map(m => `<span class="fit-tag-pill fit-tag-match" style="font-size:10.5px; padding:2px 7px;">${esc(m)}</span>`).join('');
+      } else {
+        chipsContainer.innerHTML = `<span style="font-size:11px; color:var(--text-dim);">No specific missing skills identified.</span>`;
+      }
+    }
+
+    async function quickTailorDraftSkills(idx, btn) {
+      const d = drafts[idx];
+      if (!d) return;
+      const c = contacts.find(x => (x.hr_email || x.gmail) === d.to_email) || {
+        name: d.to_name,
+        title: '',
+        post_text: ''
+      };
+
+      let origHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Syncing...';
+      }
+      toast(`⚡ Surgically injecting missing skills into \\section*{Skills}...`, 'info');
+
+      try {
+        const res = await fetch('/api/resume/quick-tailor-skills', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: d.to_email,
+            hr_title: c.title || '',
+            post_text: c.post_text || d.body || '',
+            current_tex: d.tailored_tex || ''
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || 'Quick tailoring failed');
+        }
+
+        d.tailored_resume_filename = data.filename;
+        d.tailored_tex = data.tex;
+        if (data.fit) {
+          d.fit = data.fit;
+        }
+
+        await fetch('/api/save-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(d)
+        });
+
+        toast(`⚡ Missing skills synced! Red tags turned green ✓`, 'success');
+        renderDrafts();
+      } catch (err) {
+        console.error(err);
+        toast('Quick tailoring error: ' + err.message, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+      }
+    }
+
+    async function quickTailorCurrentModalSkills() {
+      if (activeTailorDraftIdx === null) return;
+      const d = drafts[activeTailorDraftIdx];
+      const c = contacts.find(x => (x.hr_email || x.gmail) === d.to_email) || {
+        name: d.to_name,
+        title: '',
+        post_text: ''
+      };
+
+      const btn = document.getElementById('btn-modal-quick-sync');
+      const spinner = document.getElementById('tailor-loading-spinner');
+      const spinnerText = document.getElementById('tailor-loading-text');
+
+      if (btn) btn.disabled = true;
+      if (spinner) {
+        spinner.style.display = 'flex';
+        spinnerText.textContent = 'Surgically syncing missing skills into \\section*{Skills}...';
+      }
+
+      try {
+        const res = await fetch('/api/resume/quick-tailor-skills', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: d.to_email,
+            hr_title: c.title || '',
+            post_text: c.post_text || d.body || '',
+            current_tex: currentTailoredTex || d.tailored_tex || ''
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || 'Quick tailoring failed');
+        }
+
+        currentTailoredTex = data.tex;
+        currentTailoredFilename = data.filename;
+        d.tailored_resume_filename = data.filename;
+        d.tailored_tex = data.tex;
+        if (data.fit) {
+          d.fit = data.fit;
+        }
+
+        document.getElementById('tailor-pdf-iframe').src = data.pdf_url;
+        document.getElementById('tailor-pdf-link').href = data.pdf_url;
+        document.getElementById('tailor-raw-tex').value = data.tex;
+
+        populateModalMissingChips(d);
+
+        await fetch('/api/save-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(d)
+        });
+
+        toast('⚡ Missing skills synced into resume! Red tags turned green ✓', 'success');
+        renderDrafts();
+      } catch (err) {
+        console.error(err);
+        toast('Quick tailoring error: ' + err.message, 'error');
+      } finally {
+        if (spinner) spinner.style.display = 'none';
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function closeTailorModal() {
+      document.getElementById('modal-tailor-resume').classList.remove('open');
+      document.getElementById('tailor-pdf-iframe').src = 'about:blank';
+      activeTailorDraftIdx = null;
+    }
+
+    function toggleLatexEditorTab() {
+      isLatexEditorMode = !isLatexEditorMode;
+      const fbPanel = document.getElementById('tailor-feedback-panel');
+      const edPanel = document.getElementById('tailor-editor-panel');
+      const toggleBtn = document.getElementById('btn-toggle-editor');
+
+      if (isLatexEditorMode) {
+        fbPanel.style.display = 'none';
+        edPanel.style.display = 'flex';
+        toggleBtn.textContent = '✨ AI Feedback Mode';
+        document.getElementById('tailor-raw-tex').value = currentTailoredTex;
+      } else {
+        fbPanel.style.display = 'flex';
+        edPanel.style.display = 'none';
+        toggleBtn.textContent = '📝 Edit Raw LaTeX';
+      }
+    }
+
+    async function submitTailorFeedback() {
+      await runTailorResumeRequest(true);
+    }
+
+    async function runTailorResumeRequest(isFeedback = false) {
+      if (activeTailorDraftIdx === null) return;
+      const d = drafts[activeTailorDraftIdx];
+      const c = contacts.find(x => (x.hr_email || x.gmail) === d.to_email) || {
+        name: d.to_name,
+        title: '',
+        post_text: ''
+      };
+
+      const spinner = document.getElementById('tailor-loading-spinner');
+      const spinnerText = document.getElementById('tailor-loading-text');
+      const btnSubmit = document.getElementById('btn-submit-tailor');
+      const feedback = isFeedback ? (document.getElementById('tailor-feedback-input').value || '').trim() : '';
+
+      spinner.style.display = 'flex';
+      spinnerText.textContent = isFeedback ? 'Applying revisions & recompiling with XeLaTeX...' : 'Tailoring skills & projects with XeLaTeX...';
+      if (btnSubmit) btnSubmit.disabled = true;
+
+      const selectedModel = document.getElementById('ai-model-select') ? document.getElementById('ai-model-select').value : 'qwen/qwen3.8-27b';
+
+      try {
+        const res = await fetch('/api/resume/tailor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: d.to_email,
+            hr_title: c.title || '',
+            post_text: c.post_text || '',
+            feedback: feedback,
+            current_tex: currentTailoredTex || '',
+            model: selectedModel
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || 'Failed to compile tailored resume');
+        }
+
+        currentTailoredTex = data.tex;
+        currentTailoredFilename = data.filename;
+
+        document.getElementById('tailor-pdf-iframe').src = data.pdf_url;
+        document.getElementById('tailor-pdf-link').href = data.pdf_url;
+        document.getElementById('tailor-raw-tex').value = data.tex;
+
+        toast(isFeedback ? 'Resume recompiled with your revisions!' : 'Tailored resume generated! Check preview.', 'success');
+      } catch (err) {
+        console.error(err);
+        toast('Tailoring error: ' + err.message, 'error');
+      } finally {
+        spinner.style.display = 'none';
+        if (btnSubmit) btnSubmit.disabled = false;
+      }
+    }
+
+    async function recompileRawTex() {
+      if (activeTailorDraftIdx === null) return;
+      const d = drafts[activeTailorDraftIdx];
+      const rawTex = document.getElementById('tailor-raw-tex').value;
+      if (!rawTex.trim()) {
+        toast('LaTeX code cannot be empty', 'error');
+        return;
+      }
+
+      const spinner = document.getElementById('tailor-loading-spinner');
+      const spinnerText = document.getElementById('tailor-loading-text');
+      spinner.style.display = 'flex';
+      spinnerText.textContent = 'Compiling raw LaTeX via Docker XeLaTeX...';
+
+      try {
+        const res = await fetch('/api/resume/compile-raw', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to_email: d.to_email,
+            tex: rawTex
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || 'Compilation failed');
+        }
+
+        currentTailoredTex = data.tex;
+        currentTailoredFilename = data.filename;
+
+        document.getElementById('tailor-pdf-iframe').src = data.pdf_url;
+        document.getElementById('tailor-pdf-link').href = data.pdf_url;
+        toast('PDF recompiled successfully!', 'success');
+      } catch (err) {
+        toast('Compile failed: ' + err.message, 'error');
+      } finally {
+        spinner.style.display = 'none';
+      }
+    }
+
+    async function applyTailoredResumeToDraft() {
+      if (activeTailorDraftIdx === null || !currentTailoredFilename) {
+        toast('No tailored resume to apply', 'info');
+        return;
+      }
+      const d = drafts[activeTailorDraftIdx];
+      d.tailored_resume_filename = currentTailoredFilename;
+      d.tailored_tex = currentTailoredTex;
+
+      try {
+        await fetch('/api/save-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(d)
+        });
+        toast(`Tailored resume attached for ${d.to_email}!`, 'success');
+        closeTailorModal();
+        renderDrafts();
+      } catch (e) {
+        toast('Error saving draft with tailored resume: ' + e.message, 'error');
+      }
+    }
+
+    let stopTailorAllRequested = false;
+
+    function stopTailorAllDrafts() {
+      stopTailorAllRequested = true;
+      const btnStop = document.getElementById('btn-stop-tailor-all');
+      if (btnStop) {
+        btnStop.disabled = true;
+        btnStop.textContent = 'Stopping...';
+      }
+      toast('Stopping batch resume tailoring after current lead...', 'info');
+    }
+
+    async function tailorAllDraftResumes() {
+      if (!drafts.length) {
+        toast('No active drafts to tailor resumes for.', 'info');
+        return;
+      }
+
+      const untailored = drafts.filter(d => !d.tailored_resume_filename);
+      const targetList = untailored.length ? untailored : drafts;
+
+      if (!confirm(`Auto-tailor resumes for ${targetList.length} application drafts via XeLaTeX?`)) {
+        return;
+      }
+
+      const btn = document.getElementById('btn-tailor-all-resumes');
+      const btnStop = document.getElementById('btn-stop-tailor-all');
+      if (btn) btn.disabled = true;
+      stopTailorAllRequested = false;
+
+      if (btnStop) {
+        btnStop.style.display = 'inline-flex';
+        btnStop.disabled = false;
+        btnStop.textContent = '⛔ Stop';
+      }
+
+      const selectedModel = document.getElementById('ai-model-select') ? document.getElementById('ai-model-select').value : 'qwen/qwen3.8-27b';
+      let successCount = 0;
+
+      for (let i = 0; i < targetList.length; i++) {
+        if (stopTailorAllRequested) break;
+
+        const d = targetList[i];
+        const c = contacts.find(x => (x.hr_email || x.gmail) === d.to_email) || {
+          name: d.to_name,
+          title: '',
+          post_text: ''
+        };
+
+        if (btn) btn.textContent = `🎯 Tailoring ${i + 1}/${targetList.length}...`;
+
+        try {
+          const res = await fetch('/api/resume/tailor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to_email: d.to_email,
+              hr_title: c.title || '',
+              post_text: c.post_text || d.body || '',
+              feedback: '',
+              current_tex: d.tailored_tex || '',
+              model: selectedModel
+            })
+          });
+
+          const data = await res.json();
+          if (data.ok) {
+            d.tailored_resume_filename = data.filename;
+            d.tailored_tex = data.tex;
+
+            await fetch('/api/save-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(d)
+            });
+
+            successCount++;
+            renderDrafts();
+          }
+        } catch (err) {
+          console.error(`Tailoring error for ${d.to_email}:`, err);
+        }
+
+        if (stopTailorAllRequested) break;
+      }
+
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `🎯 Tailor All (<span id="tailor-all-count">${drafts.length}</span>)`;
+      }
+      if (btnStop) {
+        btnStop.style.display = 'none';
+        btnStop.disabled = false;
+        btnStop.textContent = '⛔ Stop';
+      }
+
+      if (stopTailorAllRequested) {
+        toast(`Stopped batch tailoring early. ${successCount} tailored resumes attached!`, 'info');
+      } else {
+        toast(`Successfully tailored & compiled ${successCount} resumes with XeLaTeX!`, 'success');
+      }
+
+      stopTailorAllRequested = false;
+      renderDrafts();
+    }
+
+    async function applyToAll() {
+      const pending = drafts.filter(d => d.status !== 'sent');
+      if (!pending.length) {
+        toast('All drafts are already sent', 'info');
+        return;
+      }
+
+      if (!confirm(`Send ${pending.length} applications now?`)) return;
+
+      const btn = document.getElementById('btn-apply-all');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+
+      for (let i = 0; i < drafts.length; i++) {
+        if (drafts[i].status !== 'sent') {
+          await sendSingleDraft(i);
+          await new Promise(r => setTimeout(r, 600));
+        }
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = `✉ Send All (<span id="apply-all-count">0</span>)`;
+      toast('Batch sending completed', 'success');
+      await loadDrafts();
+      await loadContacts();
+      await checkDbStatus();
+    }
+
+    function openSettings() {
+      document.getElementById('s-name').value = profile.name || '';
+      document.getElementById('s-role').value = profile.role || '';
+      document.getElementById('s-skills').value = profile.skills || '';
+      document.getElementById('s-exp').value = profile.experience || '';
+      document.getElementById('s-gmail').value = profile.gmail_sender || '';
+      document.getElementById('s-pwd').value = profile.gmail_app_password || '';
+      document.getElementById('s-mongo-uri').value = profile.mongodb_uri || '';
+      document.getElementById('s-groq-key').value = profile.groq_api_key || '';
+      document.getElementById('s-openai-key').value = profile.openai_api_key || '';
+      document.getElementById('settings-modal').classList.add('open');
+    }
+
+    function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
+
+    async function saveSettings() {
+      const saveBtn = document.querySelector('#settings-modal .btn-primary');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+      }
+
+      const data = {
+        name: document.getElementById('s-name').value.trim(),
+        role: document.getElementById('s-role').value.trim(),
+        skills: document.getElementById('s-skills').value.trim(),
+        experience: document.getElementById('s-exp').value.trim(),
+        gmail_sender: document.getElementById('s-gmail').value.trim(),
+        gmail_app_password: document.getElementById('s-pwd').value.trim(),
+        mongodb_uri: document.getElementById('s-mongo-uri').value.trim(),
+        groq_api_key: document.getElementById('s-groq-key').value.trim(),
+        openai_api_key: document.getElementById('s-openai-key').value.trim(),
+      };
+
+      try {
+        const res = await fetch('/api/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        closeSettings();
+        await loadProfile();
+        await checkDbStatus();
+        if (result.mongo_connected) {
+          toast('Settings saved. MongoDB connected successfully!', 'success');
+        } else if (data.mongodb_uri) {
+          toast('Settings saved, but MongoDB connection failed. Operating in local mode.', 'warning');
+        } else {
+          toast('Settings saved successfully.', 'success');
+        }
+      } catch (err) {
+        toast('Error saving settings: ' + err.message, 'error');
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Settings';
+        }
+      }
+    }
+
+    function toast(msg, type='info') {
+      const box = document.getElementById('toast-box');
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.textContent = msg;
+      box.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    function esc(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1454 @@
+"""
+AutoApply Dashboard — Flask Backend Server
+Handles:
+- LinkedIn posts scraping via Playwright CDP
+- Groq AI query generation & Pydantic resume parsing
+- Cold email drafting via Groq (openai/gpt-oss-120b)
+- Gmail SMTP sending with resume attachment
+"""
+
+import asyncio
+import json
+import logging
+import os
+import re
+import smtplib
+from collections import deque
+from datetime import datetime
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path
+import threading
+
+import requests
+from dotenv import load_dotenv
+from flask import Flask, jsonify, request, send_from_directory
+from playwright.async_api import async_playwright
+from werkzeug.utils import secure_filename
+
+from posts_scraper import (
+    POSTS_JSON,
+    DEFAULT_QUERIES,
+    SEEN_POSTS,
+    load_seen,
+    save_records,
+    save_seen,
+    scrape_posts,
+)
+from resume_parser import (
+    StructuredResumeProfile,
+    extract_text_from_file,
+    format_candidate_context_for_prompt,
+    structure_resume_with_ai,
+)
+
+load_dotenv()
+import db
+
+app = Flask(__name__, static_folder="dashboard", static_url_path="")
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
+GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
+OPENAI_URL      = "https://api.openai.com/v1/chat/completions"
+MODEL           = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+
+OUTPUT_DIR             = Path("output")
+CONTACTS_FILE          = OUTPUT_DIR / "hr_gmail_posts.json"
+EMAILS_FILE            = OUTPUT_DIR / "cold_emails.json"
+PROFILE_FILE           = OUTPUT_DIR / "candidate_profile.json"
+SENT_LOG               = OUTPUT_DIR / "sent_log.json"
+RESUME_DIR             = OUTPUT_DIR / "resumes"
+STRUCTURED_RESUME_FILE = OUTPUT_DIR / "structured_resume.json"
+LATEX_DIR              = Path("latex_resume")
+LATEX_SOURCE_FILE      = LATEX_DIR / "resume.tex"
+TAILORED_RESUMES_DIR   = OUTPUT_DIR / "tailored_resumes"
+LATEX_COMPILER_URL     = os.getenv("LATEX_COMPILER_URL", "http://localhost:8001/compile")
+
+SEND_LOCK              = threading.Lock()
+IN_FLIGHT_SENDS        = set()
+
+OUTPUT_DIR.mkdir(exist_ok=True)
+RESUME_DIR.mkdir(exist_ok=True)
+TAILORED_RESUMES_DIR.mkdir(exist_ok=True)
+
+# ── Scraping Progress State ──────────────────────────────────────────────────
+SCRAPE_PROGRESS = {
+    "is_running": False,
+    "stop_requested": False,
+    "current_query_index": 0,
+    "total_queries": 0,
+    "current_query": "",
+    "found_count": 0,
+    "status_text": "Idle",
+    "percent": 0,
+    "new_contacts": [],
+}
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def load_json(path: Path, default=None):
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return default if default is not None else []
+
+
+def save_json(path: Path, data):
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def load_profile() -> dict:
+    default = {
+        "name": "",
+        "role": "AI/ML Engineer",
+        "experience": "2+ years building ML pipelines, LLM apps, RAG systems",
+        "skills": "Python, PyTorch, TensorFlow, LangChain, FastAPI, Docker",
+        "location": "India (open to remote / hybrid)",
+        "linkedin": "",
+        "phone": "",
+        "gmail_sender": "",
+        "gmail_app_password": "",
+        "resume_filename": "",
+        "mongodb_uri": "",
+        "groq_api_key": "",
+        "openai_api_key": "",
+    }
+    saved = load_json(PROFILE_FILE, {})
+    res = {**default, **saved}
+    if not res.get("gmail_sender"):
+        res["gmail_sender"] = os.getenv("GMAIL_SENDER") or os.getenv("SENDER_EMAIL", "")
+        if not res.get("gmail_sender"):
+            resume_data = load_json(STRUCTURED_RESUME_FILE, {})
+            res["gmail_sender"] = resume_data.get("email", "")
+    if not res.get("gmail_app_password"):
+        res["gmail_app_password"] = os.getenv("GMAIL_APP_PASSWORD", "")
+    if not res.get("mongodb_uri"):
+        res["mongodb_uri"] = os.getenv("MONGODB_URI", "")
+    if not res.get("groq_api_key"):
+        res["groq_api_key"] = os.getenv("GROQ_API_KEY", "")
+    if not res.get("openai_api_key"):
+        res["openai_api_key"] = os.getenv("OPENAI_API_KEY", "")
+    return res
+
+
+def sync_env_file(updates: dict):
+    env_path = Path(".env")
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k = stripped.split("=", 1)[0].strip()
+            if k in updates:
+                val = updates[k]
+                new_lines.append(f'{k}="{val}"' if any(c in val for c in (' ', '@', ':', '?', '&', '=')) else f'{k}={val}')
+                updated_keys.add(k)
+                continue
+        new_lines.append(line)
+
+    for k, v in updates.items():
+        if k not in updated_keys and v:
+            new_lines.append(f'{k}="{v}"' if any(c in v for c in (' ', '@', ':', '?', '&', '=')) else f'{k}={v}')
+
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
+def clean_post(text: str) -> str:
+    if not text:
+        return ""
+    skip = {'Feed post', 'Follow', 'Like', 'Comment', 'Repost', 'Send', '3rd+', '•'}
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    filtered = [l for l in lines if l not in skip and not re.match(r'^\d+\s*(reaction|comment|repost)', l, re.I)]
+    res = '\n'.join(filtered[:30])
+    return res if res.strip() else text[:600]
+
+
+def extract_email_owner_name(post_text: str, email: str) -> str:
+    """
+    Given raw LinkedIn post_text and a target email, attempt to find the name
+    of the person who *owns* that specific email in the post, rather than the
+    LinkedIn profile author who made the post.
+
+    Strategy:
+    1. Look for lines like: "Contact: John Smith\n...john.smith@gmail.com"
+       or "Send resume to John Smith at john.smith@gmail.com".
+    2. Search a ±5-line window around the email occurrence for a likely human name.
+    3. Fall back to None so caller can use stored hr_name.
+    """
+    if not post_text or not email:
+        return ""
+
+    email_lower = email.lower().strip()
+    lines = [l.strip() for l in post_text.split('\n')]
+
+    # Find line index containing the email
+    email_line_idx = None
+    for i, line in enumerate(lines):
+        if email_lower in line.lower():
+            email_line_idx = i
+            break
+
+    if email_line_idx is None:
+        return ""
+
+    # Patterns that suggest a name precedes the email on the same or adjacent line
+    # e.g. "Send your Resume to: Violeta Zelaya, ...  E-Mail: sgcbrokers@gmail.com"
+    # We look at lines within ±5 of the email occurrence
+    window_start = max(0, email_line_idx - 6)
+    window_end   = min(len(lines), email_line_idx + 3)
+    window_text  = '\n'.join(lines[window_start:window_end])
+
+    # Inline name patterns near email:  "to: Name" / "Name," / "Contact Name"
+    name_patterns = [
+        # "Send your Resume to: Firstname Lastname"
+        r'(?:to|for|contact|recruiter|from|cc)[:\s]+([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)',
+        # Standalone "Firstname Lastname" (Capitalised words) on its own line close to email
+        r'^([A-Z][a-z]{1,20}\s[A-Z][a-z]{1,25})$',
+        # Name followed by comma (attribution line)
+        r'([A-Z][a-z]{1,20}\s[A-Z][a-z]{1,25})\s*,',
+    ]
+
+    for pat in name_patterns:
+        for m in re.finditer(pat, window_text, re.MULTILINE):
+            candidate = m.group(1).strip()
+            # Reject if looks like a company or generic noun
+            bad_words = {'hiring', 'manager', 'engineer', 'developer', 'recruiter',
+                         'services', 'solutions', 'consulting', 'technologies', 'india',
+                         'limited', 'pvt', 'inc', 'llc', 'corp', 'urgent', 'required'}
+            if candidate.lower().split()[0] in bad_words:
+                continue
+            if 2 <= len(candidate.split()) <= 4:
+                return candidate
+
+    return ""
+
+
+def extract_post_for_email(post_text: str, email: str) -> str:
+    """
+    From the raw multi-person LinkedIn feed blob, extract only the portion
+    that is contextually relevant to the given email address.
+    Returns a clean snippet of at most ~400 chars around the email mention.
+    """
+    if not post_text or not email:
+        return post_text or ""
+
+    email_lower = email.lower().strip()
+    text_lower  = post_text.lower()
+    idx = text_lower.find(email_lower)
+    if idx == -1:
+        # email not found in raw text, just return cleaned full post
+        return clean_post(post_text)
+
+    # Grab a 600-char window centred on the email occurrence and expand to line boundaries
+    start = max(0, idx - 350)
+    end   = min(len(post_text), idx + 250)
+    # Snap to line start/end
+    start = post_text.rfind('\n', 0, start)
+    start = 0 if start == -1 else start + 1
+    end_nl = post_text.find('\n', end)
+    end    = end_nl if end_nl != -1 else end
+
+    snippet = post_text[start:end]
+    return clean_post(snippet) or clean_post(post_text)
+
+
+GARBAGE_PATTERNS = [
+    r'developer', r'engineer', r'software', r'cloud', r'cyber', r'defense',
+    r'resume', r'whitepaper', r'report', r'share', r'connect', r'discuss',
+    r'hello', r'weekly', r'insights', r'client', r'agentic', r'talent acquisition',
+    r'college', r'school', r'university', r'pvt ltd', r'limited', r'solutions pvt',
+    r'reach out', r'help someone', r'shape', r'more about', r'innovations'
+]
+
+def is_garbage_name(name: str) -> bool:
+    if not name or len(name) < 2:
+        return True
+    if len(name) > 30:
+        return True
+    n_lower = name.lower()
+    for gp in GARBAGE_PATTERNS:
+        if re.search(gp, n_lower):
+            return True
+    return False
+
+IGNORE_WORDS = {
+    'gmail', 'mail', 'email', 'hr', 'careers', 'career', 'carreirs', 'hiring', 'talent',
+    'jobs', 'job', 'tech', 'technologies', 'technology', 'soft', 'software', 'solutions',
+    'solution', 'services', 'service', 'systems', 'system', 'innovations', 'associate',
+    'associates', 'futurefirstp', 'futurefirst', 'firstjob', 'futuretech', 'recruit',
+    'recruiter', 'recruitment', 'hire', 'hired', 'hiring', 'consultancy', 'consulting',
+    'consultant', 'partners', 'partner', 'global', 'nsglobal', 'wikilabs', 'vectratek',
+    'sourceinfotech', 'mconvictionhr', 'lahzrtech', 'sinontechs', 'infowingsolutions',
+    'infowingsolu', 'oncorre', 'team', 'info', 'support', 'contact', 'admin', 'sales',
+    'corp', 'corporate', 'group', 'india', 'usa', 'llc', 'pvt', 'ltd', 'resilienceitsolutions',
+    'forcecraver', 'workwave', 'jamstacky', 'freelancer', 'direct', 'client', 'reach',
+    'new', 'requirementnew', 'requirement', 'cspecialist', 'brokers', 'sgcbrokers',
+    'tennaresilienceitsolutions', 'admission', 'college', 'engineering', 'risingcareer',
+    'thecorextech', 'mathisfunlike', 'weekly', 'insights', 'venturequest'
+}
+
+COMMON_NAMES = {
+    'yashi', 'harshith', 'bhargava', 'darakhshan', 'pratham', 'dharmraj', 'fenil', 'joy',
+    'sagar', 'neha', 'prasana', 'pragyasmita', 'aastha', 'bharath', 'sunny', 'rohini',
+    'aditya', 'amrutha', 'salman', 'hema', 'mahalakshmi', 'shaik', 'fshaik', 'basyam',
+    'joyce', 'rohith', 'vishal', 'vishu', 'abhishek', 'singh', 'oviya', 'clamont',
+    'yoshita', 'pratishruti', 'dharani', 'mathy', 'subha', 'kiran', 'ipseeta', 'deepika',
+    'tarun', 'abhiroop', 'abhik', 'keerthi', 'vivek', 'jashim', 'prachi', 'mohammad',
+    'huzaifa', 'faizan', 'swapnil', 'anindita', 'harvey', 'mansi', 'raunak', 'sandhya',
+    'srujani', 'srinidhi', 'devalla', 'katakam', 'jain', 'shahid', 'krish', 'sapkota',
+    'raghuvanshi', 'patro', 'sharma', 'maddipati', 'verma', 'bandar', 'singhal', 'dey',
+    'castro', 'nanda', 'marikanti', 'kumar', 'dixit', 'sana', 'zahoor'
+}
+
+def derive_name_from_email(email: str) -> str:
+    """
+    Turns an email local-part into a clean human name.
+    """
+    if not email or '@' not in email:
+        return ''
+    local = email.split('@')[0].lower()
+    for p in ('mail.', 'cv.', 'resume.', 'hr.', 'careers.', 'career.', 'info.', 'contact.', 'get.hired.by.'):
+        if local.startswith(p):
+            local = local[len(p):]
+    local_clean = re.sub(r'[\._\-]\d+$', '', local)
+    local_clean = re.sub(r'\d+$', '', local_clean)
+    tokens = re.split(r'[\._\-]+', local_clean)
+    words = []
+    for t in tokens:
+        if not t or t in IGNORE_WORDS:
+            continue
+        subwords = re.findall(r'[A-Z][a-z]*|[a-z]+', t)
+        for sw in subwords:
+            matched = False
+            for cn in sorted(COMMON_NAMES, key=len, reverse=True):
+                if sw.startswith(cn):
+                    words.append(cn)
+                    rem = sw[len(cn):]
+                    if rem and rem not in IGNORE_WORDS:
+                        for cn2 in sorted(COMMON_NAMES, key=len, reverse=True):
+                            if rem.startswith(cn2):
+                                words.append(cn2)
+                                break
+                        else:
+                            if len(rem) >= 3 and rem not in IGNORE_WORDS:
+                                words.append(rem)
+                    matched = True
+                    break
+            if not matched and len(sw) >= 3 and sw not in IGNORE_WORDS:
+                words.append(sw)
+    final_words = [w.capitalize() for w in words if w.lower() not in IGNORE_WORDS and len(w) >= 2]
+    return ' '.join(final_words[:2]) if final_words else ''
+
+def resolve_contact_name(stored_name: str, email: str) -> str:
+    """
+    Reconciles stored contact/author name with the actual email address.
+    If stored name is junk, generic, company, or clearly belongs to a different person
+    than the email address, uses the derived email name.
+    """
+    stored = (stored_name or '').strip()
+    derived = derive_name_from_email(email)
+    if is_garbage_name(stored):
+        return derived or 'Hiring Manager'
+    if not derived:
+        return stored or 'Hiring Manager'
+    stored_first = re.sub(r'[^a-zA-Z]', '', stored.split()[0]).lower() if stored else ''
+    derived_first = re.sub(r'[^a-zA-Z]', '', derived.split()[0]).lower() if derived else ''
+    if stored_first and derived_first:
+        if stored_first != derived_first and not stored_first.startswith(derived_first) and not derived_first.startswith(stored_first):
+            return derived
+    return stored
+
+def groq_stream(messages: list, model: str = None, max_tokens: int = 4096) -> str:
+    use_model = model or MODEL
+    is_openai = use_model.startswith("gpt-") or use_model.startswith("o1") or use_model.startswith("o3") or use_model.startswith("chatgpt")
+
+    # OpenAI key is completely non-mandatory. Fall back to Groq if key is missing or not wanted.
+    if is_openai:
+        api_key = (os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
+        if not api_key:
+            is_openai = False
+            use_model = MODEL or "qwen/qwen3.8-27b"
+
+    if is_openai:
+        url = OPENAI_URL
+        payload = {
+            "model": use_model,
+            "messages": messages,
+            "temperature": 0.65,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+    else:
+        api_key = os.getenv("GROQ_API_KEY", "") or GROQ_API_KEY
+        url = GROQ_URL
+        payload = {
+            "model": use_model,
+            "messages": messages,
+            "temperature": 0.65,
+            "max_completion_tokens": max_tokens,
+            "top_p": 0.95,
+            "stream": True,
+            "stop": None,
+        }
+        if "oss" in use_model.lower():
+            payload["reasoning_effort"] = "medium"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    resp = requests.post(url, json=payload, headers=headers, stream=True, timeout=60)
+    resp.raise_for_status()
+
+    full = ""
+    for line in resp.iter_lines():
+        if not line:
+            continue
+        s = line.decode("utf-8")
+        if s.startswith("data: "):
+            d = s[6:].strip()
+            if d == "[DONE]":
+                break
+            try:
+                chunk = json.loads(d)
+                content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                full += content
+            except Exception:
+                pass
+    return full.strip()
+
+
+# ── Core API Routes ──────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return send_from_directory("dashboard", "index.html")
+
+
+@app.route("/api/profile", methods=["GET"])
+def get_profile():
+    return jsonify(load_profile())
+
+
+@app.route("/api/profile", methods=["POST"])
+def save_profile_route():
+    data = request.json or {}
+    profile = load_profile()
+    profile.update(data)
+    save_json(PROFILE_FILE, profile)
+
+    env_updates = {}
+    if "mongodb_uri" in data:
+        mongo_val = (data["mongodb_uri"] or "").strip()
+        os.environ["MONGODB_URI"] = mongo_val
+        env_updates["MONGODB_URI"] = mongo_val
+        db.reset_mongo_connection()
+
+    if "groq_api_key" in data:
+        groq_val = (data["groq_api_key"] or "").strip()
+        os.environ["GROQ_API_KEY"] = groq_val
+        global GROQ_API_KEY
+        GROQ_API_KEY = groq_val
+        env_updates["GROQ_API_KEY"] = groq_val
+
+    if "openai_api_key" in data:
+        openai_val = (data["openai_api_key"] or "").strip()
+        os.environ["OPENAI_API_KEY"] = openai_val
+        global OPENAI_API_KEY
+        OPENAI_API_KEY = openai_val
+        env_updates["OPENAI_API_KEY"] = openai_val
+
+    if "gmail_sender" in data:
+        env_updates["GMAIL_SENDER"] = (data["gmail_sender"] or "").strip()
+    if "gmail_app_password" in data:
+        env_updates["GMAIL_APP_PASSWORD"] = (data["gmail_app_password"] or "").strip()
+
+    if env_updates:
+        try:
+            sync_env_file(env_updates)
+        except Exception as e:
+            print(f"Failed to update .env: {e}")
+
+    return jsonify({
+        "ok": True,
+        "mongo_connected": db.is_db_connected()
+    })
+
+
+@app.route("/api/contacts", methods=["GET"])
+def get_contacts():
+    filt = request.args.get("filter", "pending_gmail").lower().strip()
+    if filt == "all":
+        records = db.get_all_contacts()
+    elif filt == "sent":
+        records = db.get_sent_emails()
+    else:
+        records = db.get_pending_gmails()
+
+    for r in records:
+        e = (r.get("email") or r.get("hr_email") or r.get("gmail") or "").lower().strip()
+        resolved = resolve_contact_name(r.get("name"), e)
+        r["name"] = resolved
+        r["resolved_name"] = resolved
+        r["is_applied"] = (r.get("status") == "sent")
+        r["is_gmail"] = r.get("is_gmail") if "is_gmail" in r else e.endswith("@gmail.com")
+        r["email"] = e
+
+    return jsonify(records)
+
+
+@app.route("/api/applied-emails", methods=["GET"])
+def get_applied_emails():
+    return jsonify(list(db.get_applied_emails()))
+
+
+@app.route("/api/db-status", methods=["GET"])
+def get_db_status():
+    all_emails = db.get_all_emails()
+    pending_gmails = db.get_pending_gmails()
+    sent_emails = db.get_sent_emails()
+    applied = db.get_applied_emails()
+    return jsonify({
+        "connected": db.is_db_connected(),
+        "total_contacts": len(all_emails),
+        "pending_gmail_count": len(pending_gmails),
+        "pending_count": len(pending_gmails),
+        "sent_count": len(sent_emails),
+        "applied_count": max(len(sent_emails), len(applied)),
+        "unapplied_count": len(pending_gmails)
+    })
+
+
+@app.route("/api/contacts/delete", methods=["POST"])
+def delete_contact():
+    data = request.json or {}
+    target_email = (data.get("email") or "").lower().strip()
+    if not target_email:
+        return jsonify({"error": "No email provided"}), 400
+    db.delete_email(target_email)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/contacts/clear", methods=["POST"])
+def clear_contacts():
+    db.clear_pending_emails()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/emails", methods=["GET"])
+def get_emails():
+    """
+    Returns strictly pending, unsent drafts.
+    Cross-verifies every email against actual DB records (MongoDB Atlas and sent logs).
+    Any email that has already been sent is permanently excluded from this window.
+    """
+    drafts = load_json(EMAILS_FILE, [])
+    pending_drafts = []
+    has_changes = False
+
+    for d in drafts:
+        em = (d.get("to_email") or "").lower().strip()
+        if not em:
+            continue
+        # Verify with actual database & sent logs: sent emails must NEVER appear in drafts window
+        if d.get("status") == "sent" or db.is_email_applied(em):
+            if d.get("status") != "sent":
+                d["status"] = "sent"
+                has_changes = True
+            continue
+        d["to_name"] = resolve_contact_name(d.get("to_name"), em)
+        pending_drafts.append(d)
+
+    if has_changes:
+        save_json(EMAILS_FILE, drafts)
+
+    sort_mode = request.args.get("sort", "score").lower().strip()
+    if sort_mode == "date":
+        # Newest first
+        pass
+    else:
+        # Default: Sort by fit_score descending (highest score first!)
+        def get_draft_score(doc):
+            fit = doc.get("fit") or {}
+            score = fit.get("fit_score") if isinstance(fit, dict) else None
+            if score is None:
+                score = doc.get("fit_score", 70)
+            return int(score)
+        pending_drafts.sort(key=get_draft_score, reverse=True)
+
+    return jsonify(pending_drafts)
+
+
+@app.route("/api/emails/delete", methods=["POST"])
+def delete_draft():
+    data = request.json or {}
+    to_email = (data.get("to_email") or "").lower().strip()
+    if not to_email:
+        return jsonify({"error": "No email provided"}), 400
+    emails = load_json(EMAILS_FILE, [])
+    emails = [e for e in emails if (e.get("to_email") or "").lower().strip() != to_email]
+    save_json(EMAILS_FILE, emails)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/emails/clear", methods=["POST"])
+def clear_all_drafts():
+    """
+    Clears all unsent drafts from cold_emails.json while strictly preserving sent email history.
+    """
+    emails = load_json(EMAILS_FILE, [])
+    kept = [e for e in emails if e.get("status") == "sent" or db.is_email_applied(e.get("to_email", ""))]
+    save_json(EMAILS_FILE, kept)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/scrape-status", methods=["GET"])
+def get_scrape_status():
+    return jsonify(SCRAPE_PROGRESS)
+
+
+@app.route("/api/suggest-queries", methods=["POST"])
+def suggest_queries():
+    data = request.json or {}
+    topic = data.get("topic", "AI ML Engineer").strip()
+
+    prompt = f"""You are a recruiter outreach & LinkedIn search expert.
+Target role: "{topic}"
+
+Generate 10 distinct, proven search queries to find recruiter posts on LinkedIn containing contact Gmails.
+Examples: "hr with mail {topic}", "mail your cv {topic} gmail", "urgent hiring {topic} send resume gmail".
+
+Return JSON with a single key "queries" containing an array of exactly 10 strings.
+Example: {{"queries": ["query 1", "query 2", ...]}}"""
+
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a specialized query generator. Return only valid JSON."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.4,
+        "max_completion_tokens": 1024,
+        "response_format": {"type": "json_object"}
+    }
+    groq_key = os.getenv("GROQ_API_KEY", "") or GROQ_API_KEY
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {groq_key}",
+    }
+
+    try:
+        resp = requests.post(GROQ_URL, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+        res_json = resp.json()
+        raw_text = res_json["choices"][0]["message"]["content"].strip()
+        parsed = json.loads(raw_text)
+        queries = parsed.get("queries", [])
+        if queries and isinstance(queries, list):
+            return jsonify({"queries": queries[:10]})
+    except Exception:
+        pass
+
+    fallback = [
+        f"hr with mail {topic}",
+        f"mail your cv {topic} gmail",
+        f"send resume {topic} gmail",
+        f"hiring {topic} gmail india",
+        f"urgent requirement {topic} gmail",
+        f"mail cv {topic} hiring",
+        f"{topic} recruiter send resume gmail",
+        f"immediate joiner {topic} gmail",
+        f"{topic} contract remote gmail hiring",
+        f"looking for {topic} mail cv"
+    ]
+    return jsonify({"queries": fallback})
+
+
+@app.route("/api/scrape", methods=["POST"])
+def trigger_scrape():
+    global SCRAPE_PROGRESS
+    data = request.json or {}
+    queries = data.get("queries", [])
+    if isinstance(queries, str):
+        queries = [q.strip() for q in queries.split(",") if q.strip()]
+    if not queries:
+        queries = ["hr with mail"]
+    
+    max_posts = int(data.get("max_posts", 15))
+    cdp_url   = data.get("cdp_url") or os.getenv("CDP_URL", "http://localhost:9222")
+
+    SCRAPE_PROGRESS["is_running"] = True
+    SCRAPE_PROGRESS["stop_requested"] = False
+    SCRAPE_PROGRESS["total_queries"] = len(queries)
+    SCRAPE_PROGRESS["current_query_index"] = 0
+    SCRAPE_PROGRESS["found_count"] = 0
+    SCRAPE_PROGRESS["percent"] = 5
+    SCRAPE_PROGRESS["status_text"] = "Connecting to Chrome on port 9222..."
+    SCRAPE_PROGRESS["new_contacts"] = []
+
+    async def run_scraping():
+        global SCRAPE_PROGRESS
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp(cdp_url)
+            ctx = browser.contexts[0]
+            page = None
+            for pg in ctx.pages:
+                if "linkedin" in pg.url:
+                    page = pg
+                    break
+            if not page:
+                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            page.set_default_timeout(20000)
+
+            existing_before = {
+                (e.get("email") or e.get("hr_email") or e.get("gmail") or "").lower().strip()
+                for e in db.get_all_emails()
+                if (e.get("email") or e.get("hr_email") or e.get("gmail"))
+            }
+            # Strictly include all sent and applied email history across MongoDB and local logs
+            for app_em in db.get_applied_emails():
+                clean_app = (app_em or "").lower().strip()
+                if clean_app:
+                    existing_before.add(clean_app)
+
+            new_in_session = 0
+            all_saved = []
+            new_contacts_list = []
+
+            try:
+                for idx, query in enumerate(queries, 1):
+                    # Check stop flag before each query
+                    if SCRAPE_PROGRESS.get("stop_requested"):
+                        SCRAPE_PROGRESS["status_text"] = f"Stopped by user after {idx - 1} queries. {new_in_session} new contacts collected."
+                        break
+
+                    SCRAPE_PROGRESS["current_query_index"] = idx
+                    SCRAPE_PROGRESS["current_query"] = query
+                    SCRAPE_PROGRESS["percent"] = int((idx / len(queries)) * 95)
+                    SCRAPE_PROGRESS["status_text"] = f"Searching ({idx}/{len(queries)}): '{query}'..."
+
+                    results = await scrape_posts(
+                        page=page,
+                        queries=[query],
+                        max_posts_per_query=max_posts,
+                    )
+                    all_saved = db.save_contacts(results)
+
+                    # Track newly discovered contacts in this query
+                    for item in results:
+                        raw_em = (item.get("email") or item.get("hr_email") or item.get("gmail") or "").lower().strip()
+                        if raw_em and raw_em not in existing_before:
+                            existing_before.add(raw_em)
+                            resolved = resolve_contact_name(item.get("name"), raw_em)
+                            new_contacts_list.append({
+                                "name": resolved,
+                                "email": raw_em,
+                                "hr_email": raw_em,
+                                "title": item.get("title") or "Talent Acquisition / HR",
+                                "company": item.get("company") or "",
+                                "post_text": item.get("post_text") or "",
+                                "linkedin_url": item.get("post_url") or item.get("linkedin_url") or "",
+                                "query": query,
+                                "status": "pending",
+                                "created_at": datetime.now().strftime("%I:%M %p")
+                            })
+
+                    new_in_session = len(new_contacts_list)
+                    SCRAPE_PROGRESS["found_count"] = new_in_session
+                    SCRAPE_PROGRESS["new_contacts"] = new_contacts_list
+
+                if not SCRAPE_PROGRESS.get("stop_requested"):
+                    SCRAPE_PROGRESS["percent"] = 100
+                    SCRAPE_PROGRESS["status_text"] = f"Finished! Collected {new_in_session} new contacts ({len(db.get_pending_gmails())} total pending Gmails)."
+                return all_saved, new_in_session, new_contacts_list
+            finally:
+                SCRAPE_PROGRESS["is_running"] = False
+                SCRAPE_PROGRESS["stop_requested"] = False
+                await browser.close()
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        records, new_count, new_contacts = loop.run_until_complete(run_scraping())
+        return jsonify({
+            "ok": True,
+            "count": len(records),
+            "new_count": new_count,
+            "records": records,
+            "new_contacts": new_contacts
+        })
+    except Exception as e:
+        SCRAPE_PROGRESS["is_running"] = False
+        SCRAPE_PROGRESS["status_text"] = f"Error: {e}"
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scrape/stop", methods=["POST"])
+def stop_scrape():
+    SCRAPE_PROGRESS["stop_requested"] = True
+    SCRAPE_PROGRESS["status_text"] = "Stop requested — finishing current query..."
+    return jsonify({"ok": True, "message": "Stop requested. Will stop after current query finishes."})
+
+
+@app.route("/api/upload-resume", methods=["POST"])
+def upload_resume():
+    if 'resume' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    file = request.files['resume']
+    if file.filename == '':
+        return jsonify({"error": "Empty filename"}), 400
+
+    filename = secure_filename(file.filename)
+    save_path = RESUME_DIR / filename
+    file.save(str(save_path))
+
+    structured_data = None
+    try:
+        raw_text = extract_text_from_file(save_path)
+        parsed_profile = structure_resume_with_ai(raw_text)
+        structured_data = parsed_profile.model_dump()
+        save_json(STRUCTURED_RESUME_FILE, structured_data)
+
+        # Sync profile settings
+        profile = load_profile()
+        profile['resume_filename'] = filename
+        if parsed_profile.name:
+            profile['name'] = parsed_profile.name
+        if parsed_profile.headline_or_role:
+            profile['role'] = parsed_profile.headline_or_role
+        if parsed_profile.key_skills:
+            profile['skills'] = ", ".join(parsed_profile.key_skills[:12])
+        if parsed_profile.years_of_experience:
+            profile['experience'] = f"{parsed_profile.years_of_experience} experience"
+        if parsed_profile.location:
+            profile['location'] = parsed_profile.location
+        if parsed_profile.linkedin_url:
+            profile['linkedin'] = parsed_profile.linkedin_url
+        if parsed_profile.phone:
+            profile['phone'] = parsed_profile.phone
+            
+        save_json(PROFILE_FILE, profile)
+    except Exception:
+        profile = load_profile()
+        profile['resume_filename'] = filename
+        save_json(PROFILE_FILE, profile)
+
+    return jsonify({
+        "ok": True,
+        "filename": filename,
+        "structured": structured_data
+    })
+
+
+@app.route("/api/generate", methods=["POST"])
+def generate_email():
+    data = request.json or {}
+    hr_name_raw = data.get("name", "Hiring Manager")
+    hr_title    = data.get("title", "")
+    post_text   = data.get("post_text", "")
+    hr_email    = data.get("hr_email", "")
+    req_model   = data.get("model") or MODEL
+    profile     = load_profile()
+
+    # ── Correct name & post context for this specific email ──────────────────
+    # The raw post_text is often a LinkedIn feed blob containing multiple names
+    # and multiple emails. We must extract the owner of THIS email, not just the
+    # LinkedIn profile author stored as `name`.
+    extracted_owner = extract_email_owner_name(post_text, hr_email)
+
+    # Resolve correct human name for this recipient
+    hr_name = resolve_contact_name(extracted_owner or hr_name_raw, hr_email)
+
+    # Extract only the post portion relevant to this email
+    relevant_post = extract_post_for_email(post_text, hr_email)
+
+    first_name = "there"
+    if hr_name and hr_name not in ["Unknown", "Hiring Manager", "LinkedIn Recruiter"]:
+        first_name = hr_name.split()[0].strip()
+
+
+    structured_resume = load_json(STRUCTURED_RESUME_FILE, None)
+    if structured_resume:
+        try:
+            parsed_model = StructuredResumeProfile.model_validate(structured_resume)
+            candidate_context = format_candidate_context_for_prompt(parsed_model)
+            cand_name = parsed_model.name or profile.get("name") or "Parth Srivastava"
+        except Exception:
+            cand_name = profile.get("name") or "Parth Srivastava"
+            candidate_context = f"""Candidate Profile:
+- Name: {cand_name}
+- Role: {profile['role']}
+- Experience: {profile['experience']}
+- Skills: {profile['skills']}
+- Location: {profile['location']}"""
+    else:
+        cand_name = profile.get("name") or "Parth Srivastava"
+        candidate_context = f"""Candidate Profile:
+- Name: {cand_name}
+- Role: {profile['role']}
+- Experience: {profile['experience']}
+- Skills: {profile['skills']}
+- Location: {profile['location']}"""
+
+    system_prompt = f"""You are a skilled AI/ML engineer ({cand_name}) writing a direct, high-converting cold email application to an engineering recruiter or hiring manager who posted on LinkedIn.
+
+{candidate_context}
+
+CRITICAL RULES TO ENSURE A 100% HUMAN, NON-ROBOTIC EMAIL:
+1. STRICTLY BANNED ROBOTIC CLICHES:
+   - NEVER use generic filler: 'I hope this email finds you well', 'I am writing to express my interest', 'I was excited/thrilled to see your post', 'esteemed organization', 'valuable asset', 'Dear Sir/Madam'.
+   - NEVER start with a formulaic bio: 'I am {cand_name}, an AI/ML Engineer with 2+ years of experience...'.
+2. OPENING HOOK (Sentence 1):
+   - Start naturally: 'Hi {first_name},'
+   - Immediately hook into their specific post: reference what they are actively hiring for, the specific role title, and any key technologies or urgency mentioned in their post.
+3. CONCRETE RELEVANCE & PROOF (Sentences 2-3):
+   - Pick 1 or 2 specific technical accomplishments from the Candidate Profile that directly solve what the recruiter is looking for.
+   - Mention real tools and metrics (e.g. vLLM, QLoRA, FastAPI, RAG, Docker, multi-cloud GPU orchestrators).
+   - DO NOT dump the entire resume. Be selective and hyper-relevant.
+4. LOW-FRICTION CLOSE:
+   - Note that your resume is attached for review.
+   - Low-friction ask: 5-10 minutes for a brief introductory call this week or next.
+5. LENGTH & STYLE:
+   - 70 to 100 words total. Clean, punchy paragraphs. Recruiters read on mobile and scan in 8 seconds.
+   - Sign off cleanly with: Best,\n{cand_name}
+   - Plain text only. No brackets or placeholders like [Your Name].
+
+Output format ONLY:
+Subject: <catchy, human subject line tailored to the post>
+
+<email body>"""
+
+    # Use the per-email relevant post snippet (already cleaned inside extract_post_for_email)
+    cleaned_post = relevant_post.strip()
+    if not cleaned_post:
+        cleaned_post = f"Hiring for {hr_title or 'AI/ML Engineer role'}."
+
+    user_msg = (
+        f"Recipient Email: {hr_email}\n"
+        f"Recruiter Name: {hr_name}\n"
+        f"Recruiter Headline / Company: {hr_title}\n\n"
+        f"Relevant LinkedIn Post Content (about this specific recruiter):\n{cleaned_post}\n\n"
+        "IMPORTANT: The email must start with 'Hi {first_name},' where {first_name} = the recruiter's first name above. "
+        "DO NOT mention any other recruiter's name. Write only about the job details in the post above.\n\n"
+        "Write the human, contextual cold email now."
+    ).format(first_name=first_name)
+
+    try:
+        result = groq_stream([
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_msg},
+        ], model=req_model)
+
+        # Strip out reasoning blocks from thinking models (e.g. <think>...</think>)
+        clean_result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
+        if not clean_result:
+            clean_result = result  # fallback if whole output was inside think tags
+
+        subject, body = "", clean_result
+        if clean_result.lower().startswith("subject:"):
+            parts = clean_result.split('\n', 2)
+            subject = parts[0].replace("Subject:", "").replace("subject:", "").strip()
+            body = '\n'.join(parts[1:]).strip()
+        elif '\n' in clean_result:
+            # Try finding subject line anywhere in first 3 lines
+            lines = clean_result.split('\n')
+            for i, line in enumerate(lines[:4]):
+                if line.lower().startswith('subject:'):
+                    subject = line.replace("Subject:", "").replace("subject:", "").strip()
+                    body = '\n'.join(lines[i+1:]).strip()
+                    break
+
+        # Compute match & fit score with dynamic proportional normalization
+        fit_data = {}
+        try:
+            from scorer import score_match
+            fit_data = score_match(
+                post_text=post_text or cleaned_post,
+                candidate_profile=profile,
+                hr_title=hr_title
+            )
+        except Exception as fit_err:
+            print(f"Scoring error: {fit_err}")
+
+        return jsonify({
+            "subject": subject,
+            "body": body,
+            "raw": result,
+            "resolved_name": hr_name,
+            "fit": fit_data
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/send", methods=["POST"])
+def send_email():
+    data     = request.json or {}
+    to_email = data.get("to_email", "")
+    subject  = data.get("subject", "")
+    body     = data.get("body", "")
+    profile  = load_profile()
+
+    sender   = (profile.get("gmail_sender") or "").strip()
+    password = (profile.get("gmail_app_password") or "").strip().replace(" ", "")
+    resume_fn = profile.get("resume_filename", "")
+
+    if not sender or not password:
+        return jsonify({"error": "Gmail sender and app password not set in Settings"}), 400
+    if not to_email:
+        return jsonify({"error": "No recipient email"}), 400
+
+    clean_to = to_email.lower().strip()
+
+    with SEND_LOCK:
+        if clean_to in IN_FLIGHT_SENDS:
+            return jsonify({"error": f"An email to {clean_to} is already in progress. Duplicate prevented."}), 400
+        if db.is_email_applied(clean_to):
+            return jsonify({"error": f"Already applied to {clean_to}. Duplicate permanently prevented."}), 400
+        IN_FLIGHT_SENDS.add(clean_to)
+
+    try:
+        msg = MIMEMultipart()
+        msg["Subject"] = subject
+        msg["From"]    = sender
+        msg["To"]      = to_email
+        msg.attach(MIMEText(body, "plain"))
+
+        tailored_fn = data.get("tailored_resume_filename") or ""
+        attached_resume = False
+
+        if tailored_fn:
+            tailored_path = TAILORED_RESUMES_DIR / secure_filename(tailored_fn)
+            if tailored_path.exists():
+                with open(tailored_path, "rb") as f:
+                    part = MIMEApplication(f.read(), Name="Parth_Srivastava_Resume.pdf")
+                part['Content-Disposition'] = 'attachment; filename="Parth_Srivastava_Resume.pdf"'
+                msg.attach(part)
+                attached_resume = True
+
+        if not attached_resume and resume_fn:
+            resume_path = RESUME_DIR / resume_fn
+            if resume_path.exists():
+                with open(resume_path, "rb") as f:
+                    part = MIMEApplication(f.read(), Name=resume_fn)
+                part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
+                msg.attach(part)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(sender, password)
+            smtp.sendmail(sender, to_email, msg.as_string())
+
+        # Permanently record applied email in MongoDB and local file
+        to_name = resolve_contact_name(data.get("to_name"), clean_to)
+        db.mark_email_applied(clean_to, name=to_name, subject=subject, body=body)
+
+        emails = load_json(EMAILS_FILE, [])
+        for e in emails:
+            if (e.get("to_email") or "").lower().strip() == clean_to:
+                e["status"] = "sent"
+        save_json(EMAILS_FILE, emails)
+
+        # Append to sent_log.json if not present
+        sent_log = load_json(SENT_LOG, [])
+        if not any((r.get("email") or r.get("to") or "").lower().strip() == clean_to for r in sent_log):
+            sent_log.append({
+                "email": clean_to,
+                "name": to_name,
+                "subject": subject,
+                "sent_at": datetime.now().isoformat()
+            })
+            save_json(SENT_LOG, sent_log)
+
+        return jsonify({"ok": True, "message": f"Email sent to {to_email}"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        with SEND_LOCK:
+            IN_FLIGHT_SENDS.discard(clean_to)
+
+
+# ── LaTeX Resume Customization & Preview Endpoints ────────────────────────────
+
+def clean_latex_output(raw_tex: str) -> str:
+    """Strips markdown code blocks, think blocks, or surrounding chatter."""
+    clean = re.sub(r'<think>.*?</think>', '', raw_tex, flags=re.DOTALL).strip()
+    if clean.startswith("```"):
+        clean = re.sub(r'^```(?:latex|tex)?\n', '', clean)
+        clean = re.sub(r'\n```$', '', clean)
+    return clean.strip()
+
+
+def compile_latex_via_service(tex_code: str) -> bytes:
+    """Calls the XeLaTeX Docker compiler microservice."""
+    resp = requests.post(
+        LATEX_COMPILER_URL,
+        json={"tex": tex_code, "engine": "xelatex", "runs": 1, "timeout_seconds": 35},
+        timeout=40
+    )
+    if resp.status_code != 200:
+        try:
+            err_data = resp.json()
+            err_msg = err_data.get("detail", {}).get("compiler_output") or str(err_data)
+        except Exception:
+            err_msg = resp.text
+        raise ValueError(f"LaTeX compilation failed: {err_msg}")
+    return resp.content
+
+
+def get_tailored_pdf_filename(email: str) -> str:
+    safe_em = re.sub(r'[^a-zA-Z0-9]', '_', email.lower().strip())
+    return f"resume_{safe_em}.pdf"
+
+
+@app.route("/api/resume/base-tex", methods=["GET"])
+def get_base_tex():
+    if not LATEX_SOURCE_FILE.exists():
+        return jsonify({"error": "Master resume.tex not found"}), 404
+    return jsonify({
+        "tex": LATEX_SOURCE_FILE.read_text(encoding="utf-8"),
+        "filename": "resume.tex"
+    })
+
+
+@app.route("/api/resume/pdf/<path:filename>", methods=["GET"])
+def serve_tailored_pdf(filename):
+    clean_fn = secure_filename(filename)
+    target = TAILORED_RESUMES_DIR / clean_fn
+    if not target.exists():
+        if LATEX_SOURCE_FILE.exists():
+            try:
+                pdf_bytes = compile_latex_via_service(LATEX_SOURCE_FILE.read_text(encoding="utf-8"))
+                target.write_bytes(pdf_bytes)
+            except Exception:
+                pass
+    if target.exists():
+        return send_from_directory(TAILORED_RESUMES_DIR, clean_fn, mimetype="application/pdf")
+    if (RESUME_DIR / "parth_resume.pdf").exists():
+        return send_from_directory(RESUME_DIR, "parth_resume.pdf", mimetype="application/pdf")
+    return jsonify({"error": "PDF not found"}), 404
+
+
+@app.route("/api/resume/tailor", methods=["POST"])
+def tailor_resume():
+    data = request.json or {}
+    to_email = (data.get("to_email") or "generic").lower().strip()
+    post_text = data.get("post_text", "")
+    hr_title = data.get("hr_title", "")
+    feedback = data.get("feedback", "").strip()
+    current_tex = data.get("current_tex", "").strip()
+    req_model = data.get("model") or MODEL
+
+    if not current_tex:
+        if LATEX_SOURCE_FILE.exists():
+            base_tex = LATEX_SOURCE_FILE.read_text(encoding="utf-8")
+        else:
+            return jsonify({"error": "Master resume.tex not found"}), 404
+    else:
+        base_tex = current_tex
+
+    profile = load_profile()
+    cand_name = profile.get("name") or "Parth Srivastava"
+
+    system_prompt = f"""You are an elite LaTeX Resume Customization Specialist for {cand_name}.
+Your job is to tailor the candidate's existing master LaTeX resume to be hyper-relevant for a specific job post while preserving truthfulness, structure, and 1-page geometry.
+
+CRITICAL RULES FOR RESUME TAILORING:
+1. STRICT LATEX INTEGRITY:
+   - Output MUST start with \\documentclass and end with \\end{{document}}.
+   - DO NOT alter the preamble, geometry, fontawesome5 icons, hyperref settings, section formatting, or document layout.
+   - Use standard LaTeX syntax. Escape special characters like % as \\%, & as \\&, _ as \\_.
+2. CONTENT CUSTOMIZATION:
+   - Skills Section (\\section*{{Skills}}):
+     - Prioritize and emphasize technologies explicitly requested in the recruiter post that align with candidate capabilities.
+     - Add relevant matching skills (e.g. if post asks for LangChain / FastAPI / Docker / AWS / NLP, ensure they are prominently listed).
+   - Experience & Projects:
+     - Slightly adjust bullet point phrasing to emphasize the specific outcomes and tech stack requested by the recruiter.
+     - Keep the facts, roles, companies, and dates 100% accurate (never invent fake companies or fake degrees).
+3. 1-PAGE PAGE-FIT CONSTRAINT:
+   - The compiled PDF MUST fit cleanly on exactly ONE page.
+   - Keep bullet points concise and punchy (1-2 lines per bullet). Do not add excessive vertical space.
+4. INCORPORATE USER REVISION FEEDBACK (if provided):
+   - If the user provides specific revision instructions (e.g. 'remove kafka', 'shorten project 2', 'emphasize vLLM'), implement those revisions strictly.
+5. OUTPUT FORMAT ONLY:
+   - Return ONLY the complete, raw LaTeX source code.
+   - DO NOT write any markdown commentary, explanation, or code fences (no ```latex)."""
+
+    user_prompt = f"""Recipient Recruiter Email: {to_email}
+Recruiter Role / Title: {hr_title}
+
+Job Post Context:
+\"\"\"{post_text[:3000]}\"\"\"
+
+User Revision Feedback (if any):
+\"\"\"{feedback or "Tailor the skills and project bullet points to maximize alignment with this job post."}\"\"\"
+
+Current Master LaTeX Resume:
+\"\"\"{base_tex}\"\"\"
+
+Provide the tailored complete LaTeX document now:"""
+
+    try:
+        raw_result = groq_stream([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ], model=req_model)
+
+        tailored_tex = clean_latex_output(raw_result)
+
+        # Compile via Docker XeLaTeX service
+        pdf_bytes = compile_latex_via_service(tailored_tex)
+
+        out_pdf_name = get_tailored_pdf_filename(to_email)
+        out_pdf_path = TAILORED_RESUMES_DIR / out_pdf_name
+        out_pdf_path.write_bytes(pdf_bytes)
+
+        # Save tailored .tex alongside for reference
+        out_tex_name = out_pdf_name.replace(".pdf", ".tex")
+        (TAILORED_RESUMES_DIR / out_tex_name).write_text(tailored_tex, encoding="utf-8")
+
+        timestamp = int(datetime.now().timestamp())
+        return jsonify({
+            "ok": True,
+            "tex": tailored_tex,
+            "pdf_url": f"/api/resume/pdf/{out_pdf_name}?t={timestamp}",
+            "filename": out_pdf_name
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/resume/compile-raw", methods=["POST"])
+def compile_raw_resume():
+    data = request.json or {}
+    to_email = (data.get("to_email") or "generic").lower().strip()
+    tex_code = data.get("tex", "").strip()
+
+    if not tex_code:
+        return jsonify({"error": "No LaTeX code provided"}), 400
+
+    clean_tex = clean_latex_output(tex_code)
+
+    try:
+        pdf_bytes = compile_latex_via_service(clean_tex)
+
+        out_pdf_name = get_tailored_pdf_filename(to_email)
+        out_pdf_path = TAILORED_RESUMES_DIR / out_pdf_name
+        out_pdf_path.write_bytes(pdf_bytes)
+
+        out_tex_name = out_pdf_name.replace(".pdf", ".tex")
+        (TAILORED_RESUMES_DIR / out_tex_name).write_text(clean_tex, encoding="utf-8")
+
+        timestamp = int(datetime.now().timestamp())
+        return jsonify({
+            "ok": True,
+            "tex": clean_tex,
+            "pdf_url": f"/api/resume/pdf/{out_pdf_name}?t={timestamp}",
+            "filename": out_pdf_name
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def inject_skills_into_resume(base_tex: str, skills_to_add: list[str]) -> str:
+    """
+    Deterministically and cleanly injects target skills into LaTeX \\section*{Skills} categories.
+    Guarantees 100% preservation of all section dividers, \\section*{Experience}, and LaTeX structure.
+    """
+    if not skills_to_add:
+        return base_tex
+
+    # Define standard category keywords for routing
+    cat_keywords = {
+        "prog": ["python", "java", "c++", "c#", "c", "golang", "go", "rust", "typescript", "javascript", "scala", "ruby", "php", "sql", "kql", "r", "kotlin", "swift", "bash", "shell"],
+        "ai": ["ai", "agents", "agentic", "rag", "llm", "fine-tuning", "peft", "qlora", "nlp", "synthetic data", "prompt engineering", "deep learning", "machine learning", "mlops", "generative ai", "genai", "computer vision", "diffusion", "embeddings", "vector search", "transformers"],
+        "fw": ["fastapi", "flask", "django", "spring boot", "spring", "pytorch", "tensorflow", "keras", "hugging face", "langchain", "langgraph", "pydantic", "sqlalchemy", "next.js", "react", "angular", "vue", "scikit-learn", "node.js", "express", "pandas", "numpy"],
+        "db": ["postgresql", "postgres", "mongodb", "mysql", "redis", "cassandra", "dynamodb", "elasticsearch", "pinecone", "chroma", "faiss", "weaviate", "qdrant", "milvus", "sqlite", "jwt", "clerk", "oauth", "security", "aes-256"],
+        "cloud": ["aws", "gcp", "google cloud", "azure", "docker", "kubernetes", "k8s", "vllm", "runpod", "novita", "linux", "airflow", "prometheus", "locust", "git", "github", "ci/cd", "terraform", "helm", "devops"]
+    }
+
+    # Match each category line in base_tex
+    lines = base_tex.split('\n')
+    new_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(r"\textbf{Programming:}"):
+            for s in list(skills_to_add):
+                s_clean = s.strip()
+                s_low = s_clean.lower()
+                if any(kw in s_low for kw in cat_keywords["prog"]) and s_low not in line.lower():
+                    line = line.rstrip() + f", {s_clean}"
+                    skills_to_add.remove(s)
+        elif stripped.startswith(r"\textbf{AI \& LLM Systems:}") or stripped.startswith(r"\textbf{AI & LLM Systems:}"):
+            for s in list(skills_to_add):
+                s_clean = s.strip()
+                s_low = s_clean.lower()
+                if any(kw in s_low for kw in cat_keywords["ai"]) and s_low not in line.lower():
+                    line = line.rstrip() + f", {s_clean}"
+                    skills_to_add.remove(s)
+        elif stripped.startswith(r"\textbf{Frameworks \& Backend:}") or stripped.startswith(r"\textbf{Frameworks & Backend:}"):
+            for s in list(skills_to_add):
+                s_clean = s.strip()
+                s_low = s_clean.lower()
+                if any(kw in s_low for kw in cat_keywords["fw"]) and s_low not in line.lower():
+                    line = line.rstrip() + f", {s_clean}"
+                    skills_to_add.remove(s)
+        elif stripped.startswith(r"\textbf{Databases \& Security:}") or stripped.startswith(r"\textbf{Databases & Security:}"):
+            for s in list(skills_to_add):
+                s_clean = s.strip()
+                s_low = s_clean.lower()
+                if any(kw in s_low for kw in cat_keywords["db"]) and s_low not in line.lower():
+                    line = line.rstrip() + f", {s_clean}"
+                    skills_to_add.remove(s)
+        elif stripped.startswith(r"\textbf{Cloud, DevOps \& Tools:}") or stripped.startswith(r"\textbf{Cloud, DevOps & Tools:}"):
+            for s in list(skills_to_add):
+                s_clean = s.strip()
+                s_low = s_clean.lower()
+                if any(kw in s_low for kw in cat_keywords["cloud"]) and s_low not in line.lower():
+                    line = line.rstrip() + f", {s_clean}"
+                    skills_to_add.remove(s)
+        new_lines.append(line)
+
+    # Any remaining unclassified skills go to Frameworks & Backend
+    if skills_to_add:
+        final_lines = []
+        for line in new_lines:
+            if (line.strip().startswith(r"\textbf{Frameworks \& Backend:}") or line.strip().startswith(r"\textbf{Frameworks & Backend:}")):
+                for s in skills_to_add:
+                    s_clean = s.strip()
+                    if s_clean.lower() not in line.lower():
+                        line = line.rstrip() + f", {s_clean}"
+            final_lines.append(line)
+        return '\n'.join(final_lines)
+
+    return '\n'.join(new_lines)
+
+
+@app.route("/api/resume/quick-tailor-skills", methods=["POST"])
+def quick_tailor_skills():
+    """
+    Surgically tailors ONLY the skill lines inside \\section*{Skills}.
+    Never modifies section boundaries, \\titlerule, \\section*{Experience}, or document layout.
+    """
+    data = request.json or {}
+    to_email = (data.get("to_email") or "generic").lower().strip()
+    post_text = data.get("post_text", "")
+    hr_title = data.get("hr_title", "")
+    current_tex = data.get("current_tex", "").strip()
+
+    # Always start from pristine master resume.tex if current_tex is corrupted or missing
+    if not current_tex or r"\section*{Experience}" not in current_tex:
+        if LATEX_SOURCE_FILE.exists():
+            base_tex = LATEX_SOURCE_FILE.read_text(encoding="utf-8")
+        else:
+            return jsonify({"error": "Master resume.tex not found"}), 404
+    else:
+        base_tex = current_tex
+
+    # Extract missing skills from post requirements
+    from scorer import extract_post_requirements, is_skill_matched, load_all_candidate_skills, score_match
+    profile = load_profile()
+    reqs = extract_post_requirements(post_text, hr_title)
+    cand_skills_set, full_text = load_all_candidate_skills(profile)
+
+    missing_skills = [
+        s.strip() for s in reqs.get("required_skills", [])
+        if not is_skill_matched(s, cand_skills_set, full_text, "")
+    ]
+    if not missing_skills:
+        missing_skills = [s.strip() for s in reqs.get("required_skills", [])]
+
+    # Inject deterministically into the exact skill categories
+    tailored_tex = inject_skills_into_resume(base_tex, list(missing_skills))
+
+    try:
+        # Safety check: Guarantee that section header for Experience exists and has title rule
+        if r"\section*{Experience}" not in tailored_tex:
+            if LATEX_SOURCE_FILE.exists():
+                master_tex = LATEX_SOURCE_FILE.read_text(encoding="utf-8")
+                exp_part = master_tex[master_tex.find(r"\section*{Experience}"):]
+                tailored_tex = tailored_tex[:tailored_tex.find(r"\normalsize") + len(r"\normalsize")] + "\n\n%==================== EXPERIENCE ====================%\n" + exp_part
+
+        # Compile via Docker XeLaTeX
+        pdf_bytes = compile_latex_via_service(tailored_tex)
+
+        out_pdf_name = get_tailored_pdf_filename(to_email)
+        out_pdf_path = TAILORED_RESUMES_DIR / out_pdf_name
+        out_pdf_path.write_bytes(pdf_bytes)
+
+        out_tex_name = out_pdf_name.replace(".pdf", ".tex")
+        (TAILORED_RESUMES_DIR / out_tex_name).write_text(tailored_tex, encoding="utf-8")
+
+        # Re-score match with this custom tailored text so red pills turn to green!
+        updated_fit = score_match(post_text, profile, hr_title=hr_title)
+        new_skills_set, new_full_text = load_all_candidate_skills(profile)
+        new_full_text += " " + tailored_tex.lower()
+        matched_tags = []
+        missing_tags = []
+        for s in reqs.get("required_skills", []):
+            if is_skill_matched(s, new_skills_set, new_full_text, ""):
+                matched_tags.append(f"✓ {s.strip()}")
+            else:
+                missing_tags.append(f"✕ {s.strip()}")
+        if reqs.get("required_skills"):
+            updated_fit["matched_tags"] = matched_tags
+            updated_fit["missing_tags"] = missing_tags
+            if len(matched_tags) > 0 and len(missing_tags) == 0:
+                updated_fit["fit_score"] = max(updated_fit.get("fit_score", 85), 95)
+                updated_fit["fit_tier"] = "strong"
+
+        timestamp = int(datetime.now().timestamp())
+        return jsonify({
+            "ok": True,
+            "tex": tailored_tex,
+            "pdf_url": f"/api/resume/pdf/{out_pdf_name}?t={timestamp}",
+            "filename": out_pdf_name,
+            "fit": updated_fit,
+            "added_skills": missing_skills
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/save-email", methods=["POST"])
+def save_email():
+    data   = request.json or {}
+    emails = load_json(EMAILS_FILE, [])
+    to_email = data.get("to_email", "")
+    clean_email = to_email.lower().strip()
+    data["to_name"] = resolve_contact_name(data.get("to_name"), clean_email)
+
+    idx = next((i for i, e in enumerate(emails) if (e.get("to_email") or "").lower().strip() == clean_email), None)
+    if idx is not None:
+        emails[idx].update(data)
+        updated_item = emails.pop(idx)
+        emails.insert(0, updated_item)
+    else:
+        # Prepend new drafts so newest drafts are always at the top!
+        emails.insert(0, data)
+    save_json(EMAILS_FILE, emails)
+    return jsonify({"ok": True})
+
+
+if __name__ == "__main__":
+    print("\n" + "="*50)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 5000))
+    print(f"  Listening on http://{host}:{port}")
+    print("="*50 + "\n")
+    app.run(host=host, port=port, debug=False)

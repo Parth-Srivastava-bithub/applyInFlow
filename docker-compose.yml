@@ -1,0 +1,24 @@
+services:
+  autoapply:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: autoapply:latest
+    container_name: autoapply-app
+    restart: unless-stopped
+    shm_size: '2gb'
+    ports:
+      - "5000:5000"   # AutoApply Dashboard
+      - "6080:6080"   # noVNC Web Visual Login GUI
+      - "9222:9222"   # Chrome CDP Remote Debugging
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=5000
+      - CDP_URL=http://127.0.0.1:9222
+    volumes:
+      # Persistent Chrome session, cookies, and login credentials
+      - ./chrome_profile:/data/chrome_profile
+      # Persistent AutoApply output (emails, contacts, resumes, logs)
+      - ./output:/app/output

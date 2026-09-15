@@ -1,0 +1,119 @@
+\documentclass[a4paper,10pt]{article}
+
+\usepackage[left=0.65in,right=0.65in,top=0.65in,bottom=0.65in]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fontawesome5}
+
+\pagestyle{empty}
+
+\titleformat{\section}
+{\large\bfseries}
+{}{0em}{}[\titlerule]
+
+\setlist[itemize]{noitemsep, topsep=2pt}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+%==================== HEADER ====================%
+\begin{center}
+    {\LARGE \textbf{Parth Srivastava}}\\[5pt]
+    \faGlobe\ \href{https://parthml.in/}{parthml.in}\\[5pt]
+    \faPhone\ +91 8887664156 \quad
+    \faEnvelope\ \href{mailto:parthsrivastava6112004@gmail.com}{parthsrivastava6112004@gmail.com} \quad
+    \faLinkedin\ \href{https://www.linkedin.com/in/parth-srivastava-dsuser/}{LinkedIn} \quad
+    \faGithub\ \href{https://github.com/Parth-Srivastava-bithub}{GitHub}
+\end{center}
+
+%==================== SKILLS ====================%
+\section*{Skills}
+
+\small
+
+\textbf{Programming:} Python, SQL, TypeScript/JavaScript, KQL (Kusto Query Language)
+
+\textbf{AI \& LLM Systems:} AI Agents, RAG, LLM Fine-Tuning, PEFT, QLoRA, NLP, Synthetic Data Generation, Prompt Engineering
+
+\textbf{Frameworks \& Backend:} FastAPI, PyTorch, Hugging Face Transformers, LangChain, LangGraph, Pydantic, SQLAlchemy, Next.js, Scikit-learn
+
+\textbf{Databases \& Security:} PostgreSQL, MongoDB, SQLite, AES-256-GCM, JWT Authentication, Clerk
+
+\textbf{Cloud, DevOps \& Tools:} AWS, Docker, vLLM, RunPod, Linux, Apache Airflow, Prometheus, Locust, Git, GitHub
+
+
+\normalsize
+
+%==================== EXPERIENCE ====================%
+\section*{Experience}
+
+\textbf{AI/ML Engineer, 4Way Technologies} \hfill Nov 2025 -- Present
+\begin{itemize}[leftmargin=*]
+
+\item Deployed 20+ AI models on RunPod and Novita using Docker, vLLM, and FastAPI.
+
+\item Built Apache Airflow ETL pipelines with Bronze, Silver, and Gold data lake architecture, processing 10K+ records daily.
+
+\item Built a RAG-based chatbot with real-time knowledge synchronization, supporting dynamic document ingestion, updates, and deletion.
+
+\item Developed a multilingual AI assistant integrated with RAG for context-aware conversations across multiple languages.
+
+\item Performed API load testing using Locust and monitored latency, throughput (RPS), error rates, and concurrent user performance with Prometheus.
+
+\item Developed image generation workflows using Stable Diffusion, ComfyUI, and Automatic1111, serving 200+ users.
+
+\end{itemize}
+ 
+%==================== PROJECTS ====================%
+\section*{Projects}
+
+\textbf{Modeva — Multi-Cloud GPU Orchestrator} \hfill
+\faGlobe\ \href{https://modeva.up.railway.app//}{Modeva}
+\\[-2pt]
+\textit{Python, FastAPI, PostgreSQL, MongoDB Atlas, Docker, SQLAlchemy, LangChain, Groq, SSE, AES-256-GCM, PyJWT}
+\begin{itemize}[leftmargin=*]
+
+\item Architected Modeva, a unified multi-cloud GPU platform for comparing live spot prices, checking GPU availability, and deploying compute instances across RunPod, Novita AI, and other providers.
+
+\item Engineered end-to-end pod management APIs for provisioning, starting, stopping, and deleting instances, along with creating and attaching persistent network storage volumes across global datacenters.
+
+\item Built an autonomous natural-language assistant using recursive dependency planning and real-time streaming (SSE) that finds the best spot rates and launches instances from simple text prompts.
+
+\item Secured the platform with AES-256-GCM encryption to safely store provider API keys, Clerk JWT authentication, and 1-click interactive approval cards to verify parameters and costs before launch.
+
+\end{itemize}
+
+\vspace{6pt}
+
+\textbf{LLM Fine-Tuning Pipeline} \hfill
+\textit{Personal Project}\
+\textit{Python, Hugging Face Transformers, PEFT, PyTorch, QLoRA, RunPod, vLLM}
+\begin{itemize}[leftmargin=*]
+
+\item Fine-tuned Qwen2.5-0.5B using Full Fine-Tuning and QLoRA on RunPod GPUs for structured JSON generation.
+
+\item Built a 10K+ instruction dataset and implemented custom tokenization with label masking to train exclusively on assistant responses.
+
+\item Organized training data into progressive stages (P0, P1, ...) and removed conflicting samples to improve dataset consistency and model output reliability.
+
+\item Deployed the fine-tuned model using vLLM, exposing an OpenAI-compatible inference API for efficient, low-latency model serving.
+
+\end{itemize}
+
+%==================== ACHIEVEMENTS ====================%
+\section*{Awards \& Achievements}
+
+\textbf{Student Leader, SIH 2025} \hfill 2025
+\begin{itemize}[leftmargin=*]
+   \item Led the team in Smart India Hackathon 2025, contributing to solution design and technical decision-making.
+\end{itemize}
+
+%==================== EDUCATION ====================%
+\section*{Education}
+
+\textbf{Raj Kumar Goel Institute of Technology} \hfill Ghaziabad, UP\\
+B.Tech in Computer Science \& Engg. (Data Science) | CGPA: 7.4
+\hfill \textit{Aug 2022 -- August 2026}
+
+\end{document}
