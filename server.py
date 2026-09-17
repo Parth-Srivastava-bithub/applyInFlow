@@ -974,6 +974,72 @@ def stop_scrape():
     return jsonify({"ok": True, "message": "Stop requested. Will stop after current query finishes."})
 
 
+@app.route("/api/extension/status", methods=["GET"])
+def extension_status():
+    u = get_current_username()
+    return jsonify({
+        "ok": True,
+        "status": "ready",
+        "username": u or "unauthenticated",
+        "pending_contacts": len(db.get_pending_gmails(username=u)) if u else 0
+    })
+
+
+@app.route("/api/extension/ingest", methods=["POST"])
+def extension_ingest():
+    data = request.json or {}
+    u = get_current_username()
+    if not u and data.get("username"):
+        u = db.sanitize_username(data.get("username"))
+        
+    if not u:
+        return jsonify({"error": "Authentication required. Please sign in to AutoApply."}), 401
+        
+    leads = data.get("leads", [])
+    if not isinstance(leads, list):
+        return jsonify({"error": "Invalid payload: 'leads' must be a list."}), 400
+        
+    if not leads:
+        return jsonify({
+            "ok": True,
+            "inserted_count": 0,
+            "total_pending": len(db.get_pending_gmails(username=u)),
+            "message": "No leads received."
+        })
+
+    processed = []
+    for item in leads:
+        raw_em = (item.get("email") or item.get("hr_email") or item.get("gmail") or "").lower().strip()
+        if not raw_em or "@" not in raw_em:
+            continue
+        resolved_name = resolve_contact_name(item.get("name"), raw_em)
+        processed.append({
+            "name": resolved_name,
+            "email": raw_em,
+            "hr_email": raw_em,
+            "gmail": raw_em if raw_em.endswith("@gmail.com") else None,
+            "title": item.get("title") or "Talent Acquisition / HR",
+            "company": item.get("company") or "",
+            "post_text": (item.get("post_text") or "")[:800],
+            "linkedin_url": item.get("linkedin_url") or item.get("profile_url") or "",
+            "query": item.get("query") or "extension_scrape",
+            "status": "pending",
+            "created_at": datetime.now().strftime("%I:%M %p")
+        })
+
+    saved = db.save_contacts(processed, username=u)
+    total_pending = len(db.get_pending_gmails(username=u))
+    app.logger.info(f"Extension ingested {len(saved)} contacts for user '{u}'. Total pending: {total_pending}")
+
+    return jsonify({
+        "ok": True,
+        "inserted_count": len(saved),
+        "total_pending": total_pending,
+        "records": saved
+    })
+
+
+
 @app.route("/api/upload-resume", methods=["POST"])
 def upload_resume():
     u = get_current_username()

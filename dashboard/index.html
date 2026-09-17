@@ -503,6 +503,114 @@
       line-height: 1.4;
       padding: 0 4px;
     }
+
+    /* Sidebar Safety Card (Bottom-Left) */
+    .sidebar-safety-card {
+      background: rgba(30, 58, 138, 0.28);
+      border: 1px solid rgba(59, 130, 246, 0.32);
+      border-radius: var(--radius-md);
+      padding: 9px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .sidebar-safety-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .safety-icon-dot {
+      font-size: 13px;
+    }
+    .safety-title {
+      font-size: 10px;
+      font-weight: 800;
+      color: #93c5fd;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .sidebar-safety-desc {
+      font-size: 10.5px;
+      color: #cbd5e1;
+      line-height: 1.35;
+    }
+    .sidebar-safety-desc strong {
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    /* Top Safety Banner / Topup */
+    .top-safety-banner {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(217, 119, 6, 0.08) 100%);
+      border: 1px solid var(--warning-border);
+      border-radius: var(--radius-md);
+      padding: 10px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+    .top-safety-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    .top-safety-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--warning-soft);
+      border: 1px solid var(--warning-border);
+      color: var(--warning-text);
+      font-size: 10.5px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.4px;
+      white-space: nowrap;
+    }
+    .top-safety-text {
+      font-size: 12px;
+      color: var(--text-main);
+      line-height: 1.4;
+    }
+    .top-safety-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      line-height: 1;
+      transition: all 0.15s ease;
+    }
+    .top-safety-close:hover {
+      background: rgba(0, 0, 0, 0.06);
+      color: var(--text-main);
+    }
+    [data-theme="dark"] .top-safety-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .step1-safety-callout {
+      background: rgba(37, 99, 235, 0.06);
+      border: 1px solid var(--primary-border);
+      border-radius: var(--radius-md);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+    .step1-safety-callout strong {
+      color: var(--primary);
+    }
     .sidebar-user-pill {
       display: flex;
       align-items: center;
@@ -1570,7 +1678,16 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div class="sidebar-quote">“Opportunities don't just appear — you reach out.”</div>
+        <!-- LinkedIn Alt Account Safety Card (Bottom-Left) -->
+        <div class="sidebar-safety-card">
+          <div class="sidebar-safety-header">
+            <span class="safety-icon-dot">🛡️</span>
+            <span class="safety-title">Safety Tip</span>
+          </div>
+          <p class="sidebar-safety-desc">
+            Make sure to use an <strong>alternate LinkedIn account</strong> in Chrome for scraping to keep your primary personal profile 100% safe.
+          </p>
+        </div>
         <div class="sidebar-user-pill" onclick="openSettings()" title="Candidate Profile & Settings">
           <div class="user-avatar-circle" id="sidebar-user-avatar">👤</div>
           <div class="user-info-text">
@@ -1629,6 +1746,17 @@
                 Sign in with your username or Gmail to store your contacts and sent emails under your personal account (100 pending & 200 sent limit).
               </div>
             </div>
+          </div>
+
+          <!-- ── TOP SAFETY BANNER (TOPUP NOTICE) ── -->
+          <div class="top-safety-banner" id="top-safety-banner">
+            <div class="top-safety-left">
+              <span class="top-safety-badge">🛡️ ACCOUNT SAFETY</span>
+              <span class="top-safety-text">
+                <strong>Important:</strong> Please ensure you are logged into a <strong>secondary / alternate LinkedIn account</strong> in Chrome before starting the scraper to protect your primary personal profile.
+              </span>
+            </div>
+            <button class="top-safety-close" onclick="dismissTopSafetyBanner()" title="Dismiss note">✕</button>
           </div>
 
           <!-- ── HERO BANNER & METRICS ── -->
@@ -1696,7 +1824,13 @@
                 <div class="step-number-badge badge-num-1">1</div>
                 <span>Search Keywords & Generator</span>
               </div>
-              <span style="font-size:11.5px; color:var(--text-dim); font-weight:500;">Powered by Playwright CDP</span>
+              <span id="scrape-engine-badge" style="font-size:11.5px; color:var(--text-dim); font-weight:500;">💻 CDP Mode (Local)</span>
+            </div>
+
+            <!-- Step 1 Safety Reminder Callout -->
+            <div class="step1-safety-callout">
+              <span style="font-size:14px;">🛡️</span>
+              <span><strong>Safety Reminder:</strong> Make sure Chrome is signed into your <strong>alternate LinkedIn profile</strong> before searching.</span>
             </div>
 
             <div class="topic-search-row">
@@ -2320,6 +2454,98 @@
       }
     }
 
+    let isExtensionConnected = false;
+
+    // Listen for events from AutoApply Chrome Extension bridge
+    window.addEventListener('message', (event) => {
+      if (!event.data || event.data.target !== 'autoapply-page') return;
+      const { type } = event.data;
+
+      if (type === 'EXTENSION_READY') {
+        if (!isExtensionConnected) {
+          isExtensionConnected = true;
+          const badge = document.getElementById('scrape-engine-badge');
+          if (badge) {
+            badge.innerHTML = '⚡ Extension Connected';
+            badge.style.color = 'var(--success-text)';
+            badge.style.fontWeight = '600';
+          }
+        }
+      } else if (type === 'PROGRESS') {
+        const progBar = document.getElementById('prog-bar');
+        const progPct = document.getElementById('prog-pct');
+        const progTitle = document.getElementById('prog-title');
+        const progStatus = document.getElementById('prog-status');
+        const progFound = document.getElementById('prog-found');
+
+        if (event.data.percent !== undefined && progBar) {
+          progBar.style.width = `${event.data.percent}%`;
+          progPct.textContent = `${event.data.percent}%`;
+        }
+        if (event.data.currentQueryIndex && progTitle) {
+          progTitle.textContent = `Query ${event.data.currentQueryIndex} of ${event.data.totalQueries || searchValues.length}`;
+        }
+        if (event.data.statusText && progStatus) {
+          progStatus.textContent = event.data.statusText;
+        }
+        if (event.data.foundCount !== undefined && progFound) {
+          progFound.textContent = `${event.data.foundCount} Contacts`;
+        }
+      } else if (type === 'COMPLETE') {
+        handleScrapeCompleteFromExtension(event.data);
+      } else if (type === 'ERROR') {
+        toast('Extension Error: ' + (event.data.message || 'Scrape issue'), 'error');
+        resetScrapeUi();
+      }
+    });
+
+    async function handleScrapeCompleteFromExtension(data) {
+      const progBar = document.getElementById('prog-bar');
+      const progPct = document.getElementById('prog-pct');
+      const progTitle = document.getElementById('prog-title');
+      const progStatus = document.getElementById('prog-status');
+      const progFound = document.getElementById('prog-found');
+
+      if (progBar) progBar.style.width = '100%';
+      if (progPct) progPct.textContent = '100%';
+      if (progTitle) progTitle.textContent = 'Done (✓)';
+      if (progStatus) progStatus.textContent = data.statusText || `Synced ${data.newCount || 0} new contacts`;
+      if (progFound) progFound.textContent = `+${data.newCount || 0} Contacts`;
+
+      toast(`Scrape complete! Synced ${data.newCount || 0} new contacts`, 'success');
+
+      await loadContacts();
+      await checkDbStatus();
+      resetScrapeUi();
+    }
+
+    function resetScrapeUi() {
+      const btn = document.getElementById('btn-scrape-all');
+      const btnStop = document.getElementById('btn-stop-scrape');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '🔗 Search LinkedIn for HR Emails';
+      }
+      if (btnStop) {
+        btnStop.style.display = 'none';
+      }
+    }
+
+    function dismissTopSafetyBanner() {
+      const banner = document.getElementById('top-safety-banner');
+      if (banner) {
+        banner.style.display = 'none';
+        try { localStorage.setItem('autoapply_dismiss_safety_banner', 'true'); } catch(e) {}
+      }
+    }
+
+    try {
+      if (localStorage.getItem('autoapply_dismiss_safety_banner') === 'true') {
+        const b = document.getElementById('top-safety-banner');
+        if (b) b.style.display = 'none';
+      }
+    } catch(e) {}
+
     async function startScrapeWithValues() {
       if (!currentUsername) {
         toast('Please sign in first to run scraper and store contacts', 'warning');
@@ -2342,9 +2568,23 @@
       progBar.style.width = '5%';
       progPct.textContent = '5%';
       progTitle.textContent = `Searching (${searchValues.length} queries)...`;
-      progStatus.textContent = 'Connecting to Chrome session...';
+      progStatus.textContent = isExtensionConnected ? 'Starting Extension scrape session...' : 'Connecting to Chrome session...';
       progFound.textContent = '0 Contacts';
 
+      // If AutoApply extension is installed and ready, scrape through extension
+      if (isExtensionConnected) {
+        window.postMessage({
+          target: 'autoapply-extension',
+          action: 'START_SCRAPE',
+          queries: searchValues,
+          maxPosts: 15,
+          username: currentUsername,
+          serverUrl: window.location.origin
+        }, '*');
+        return;
+      }
+
+      // Fallback: Use local Playwright CDP endpoint
       const pollTimer = setInterval(async () => {
         try {
           const res = await apiFetch('/api/scrape-status');
@@ -2380,17 +2620,20 @@
         toast('Scrape error: ' + err.message, 'error');
       } finally {
         clearInterval(pollTimer);
-        btn.disabled = false;
-        btn.textContent = '🔗 Search LinkedIn for HR Emails';
-        btnStop.style.display = 'none';
+        resetScrapeUi();
       }
     }
 
     async function stopScraping() {
-      try {
-        await apiFetch('/api/scrape/stop', { method: 'POST' });
-        toast('Stop requested. Finishing current query...', 'info');
-      } catch (e) {}
+      if (isExtensionConnected) {
+        window.postMessage({ target: 'autoapply-extension', action: 'STOP_SCRAPE' }, '*');
+        toast('Stop requested. Stopping extension...', 'info');
+      } else {
+        try {
+          await apiFetch('/api/scrape/stop', { method: 'POST' });
+          toast('Stop requested. Finishing current query...', 'info');
+        } catch (e) {}
+      }
     }
 
     async function loadProfile() {

@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "AutoApply — Recruiter Outreach Assistant",
+  "version": "1.0.0",
+  "description": "Autonomous assistant for AutoApply to discover hiring posts on LinkedIn and sync with your dashboard.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.linkedin.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*.railway.app/*",
+    "https://*.up.railway.app/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AutoApply Recruiter Assistant",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:5000/*",
+        "http://127.0.0.1:5000/*",
+        "https://*.railway.app/*",
+        "https://*.up.railway.app/*"
+      ],
+      "js": ["bridge_dashboard.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.linkedin.com/search/results/content/*"
+      ],
+      "js": ["content_linkedin.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
