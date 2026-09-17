@@ -4,6 +4,7 @@ import unittest
 from parser import normalize_linkedin_url, extract_emails_from_text
 from filter import is_hr_recruiter_profile
 from storage import StorageManager
+from pipeline.name_cleaner import clean_name, clean_first_name
 from pathlib import Path
 import shutil
 
@@ -85,6 +86,226 @@ class TestLinkedInScraperModules(unittest.TestCase):
         finally:
             if test_dir.exists():
                 shutil.rmtree(test_dir, ignore_errors=True)
+
+
+class TestNameCleaner(unittest.TestCase):
+    """Tests for pipeline.name_cleaner — fixes the 'Rahulsingh' bug."""
+
+    def test_camel_case_split(self):
+        """CamelCase concatenation must be split on case boundary."""
+        self.assertEqual(clean_name("RahulSingh"), "Rahul Singh")
+        self.assertEqual(clean_name("PriyaSharma"), "Priya Sharma")
+        self.assertEqual(clean_name("AnkitGupta"), "Ankit Gupta")
+
+    def test_all_lowercase_concat(self):
+        """All-lowercase run-together names split via atom dictionary."""
+        self.assertEqual(clean_name("rahulsingh"), "Rahul Singh")
+        self.assertEqual(clean_name("priyasharma"), "Priya Sharma")
+
+    def test_all_caps(self):
+        """ALL-CAPS names should be title-cased."""
+        self.assertEqual(clean_name("PRIYA SHARMA"), "Priya Sharma")
+        self.assertEqual(clean_name("JOHN DOE"), "John Doe")
+
+    def test_already_clean_passthrough(self):
+        """Properly formatted names pass through unchanged."""
+        self.assertEqual(clean_name("John Doe"), "John Doe")
+        self.assertEqual(clean_name("Priya Sharma"), "Priya Sharma")
+        self.assertEqual(clean_name("Rahul Singh"), "Rahul Singh")
+
+    def test_extra_whitespace(self):
+        """Leading, trailing, and internal extra spaces are collapsed."""
+        self.assertEqual(clean_name("  John  Doe  "), "John Doe")
+
+    def test_single_name(self):
+        """A single name token is title-cased without error."""
+        self.assertEqual(clean_name("rahul"), "Rahul")
+        self.assertEqual(clean_name("PRIYA"), "Priya")
+
+    def test_empty_and_none_fallback(self):
+        """Empty or None input returns the fallback string."""
+        self.assertEqual(clean_name(""), "Hiring Manager")
+        self.assertEqual(clean_name(None), "Hiring Manager")
+        self.assertEqual(clean_name("   "), "Hiring Manager")
+
+    def test_clean_first_name(self):
+        """clean_first_name returns only the first token."""
+        self.assertEqual(clean_first_name("Rahul Singh"), "Rahul")
+        self.assertEqual(clean_first_name("RahulSingh"), "Rahul")
+        self.assertEqual(clean_first_name(""), "there")
+        self.assertEqual(clean_first_name(None), "there")
+
+    def test_hyphenated_name(self):
+        """Hyphenated names are preserved correctly."""
+        result = clean_name("Mary-Jane Watson")
+        self.assertIn("Mary", result)
+
+    def test_numeric_noise_stripped(self):
+        """Digits and punctuation noise are stripped."""
+        result = clean_name("John123 Doe!")
+        self.assertEqual(result, "John Doe")
+
+
+class TestMultiUserDb(unittest.TestCase):
+    """Tests for multi-user MongoDB and local storage operations in db.py."""
+
+    def setUp(self):
+        self.test_user_a = "test_user_alpha"
+        self.test_user_b = "test_user_beta"
+        import db
+        # Clean up any leftover test data
+        db.clear_user_data(self.test_user_a)
+        db.clear_user_data(self.test_user_b)
+
+    def tearDown(self):
+        import db
+        db.clear_user_data(self.test_user_a)
+        db.clear_user_data(self.test_user_b)
+        # Clean up local test directories if created
+        u_dir_a = db._get_user_dir(self.test_user_a)
+        u_dir_b = db._get_user_dir(self.test_user_b)
+        if u_dir_a.exists():
+            shutil.rmtree(u_dir_a, ignore_errors=True)
+        if u_dir_b.exists():
+            shutil.rmtree(u_dir_b, ignore_errors=True)
+
+    def test_sanitize_username(self):
+        """Username sanitization for collection safety."""
+        from db import sanitize_username
+        self.assertEqual(sanitize_username("parth@gmail.com"), "parth_gmail_com")
+        self.assertEqual(sanitize_username("parth.dev.123@gmail.com"), "parth_dev_123_gmail_com")
+        self.assertEqual(sanitize_username("User-Name_99"), "user-name_99")
+        self.assertEqual(sanitize_username(""), "legacy")
+        self.assertEqual(sanitize_username(None), "legacy")
+
+    def test_multi_user_isolation(self):
+        """User A's pending and sent emails do not appear in User B's collections."""
+        import db
+        leads_a = [
+            {"email": "lead1@gmail.com", "name": "Lead One", "post_text": "Hiring ML"},
+            {"email": "lead2@gmail.com", "name": "Lead Two", "post_text": "Hiring Python"},
+        ]
+        leads_b = [
+            {"email": "lead3@gmail.com", "name": "Lead Three", "post_text": "Hiring DevOps"},
+        ]
+        db.save_contacts(leads_a, username=self.test_user_a)
+        db.save_contacts(leads_b, username=self.test_user_b)
+
+        pending_a = [c["email"] for c in db.get_pending_gmails(self.test_user_a)]
+        pending_b = [c["email"] for c in db.get_pending_gmails(self.test_user_b)]
+
+        self.assertIn("lead1@gmail.com", pending_a)
+        self.assertIn("lead2@gmail.com", pending_a)
+        self.assertNotIn("lead3@gmail.com", pending_a)
+
+        self.assertIn("lead3@gmail.com", pending_b)
+        self.assertNotIn("lead1@gmail.com", pending_b)
+
+    def test_sent_email_no_context_and_removal_from_pending(self):
+        """Sent collection stores ONLY email + timestamp (no context), and removes from pending."""
+        import db
+        lead = [{"email": "recruiter@gmail.com", "name": "HR Jane", "post_text": "Secret details", "title": "Lead HR"}]
+        db.save_contacts(lead, username=self.test_user_a)
+
+        # Mark applied
+        db.mark_email_applied("recruiter@gmail.com", name="HR Jane", subject="App", body="Letter", username=self.test_user_a)
+
+        # Check pending: must be removed
+        pending = [c["email"] for c in db.get_pending_gmails(self.test_user_a)]
+        self.assertNotIn("recruiter@gmail.com", pending)
+
+        # Check sent: must exist and have NO context (no post_text, no body, no subject)
+        sent = db.get_sent_emails(self.test_user_a)
+        self.assertEqual(len(sent), 1)
+        sent_doc = sent[0]
+        self.assertEqual(sent_doc["email"], "recruiter@gmail.com")
+        self.assertIn("sent_at", sent_doc)
+        self.assertNotIn("post_text", sent_doc)
+        self.assertNotIn("body", sent_doc)
+        self.assertNotIn("subject", sent_doc)
+
+        # Strict check: is_email_applied returns True for A, False for B
+        self.assertTrue(db.is_email_applied("recruiter@gmail.com", self.test_user_a))
+        self.assertFalse(db.is_email_applied("recruiter@gmail.com", self.test_user_b))
+
+    def test_mongo_document_contains_username(self):
+        """Every record in emails and applied_emails must have username field."""
+        import db
+        lead = [{"email": "ceo@startup.ai", "name": "Founder", "title": "CEO", "post_text": "Hiring"}]
+        db.save_contacts(lead, username=self.test_user_a)
+
+        mongo = db.get_mongo_db()
+        if mongo is not None:
+            email_doc = mongo.emails.find_one({"email": "ceo@startup.ai"})
+            self.assertIsNotNone(email_doc)
+            self.assertEqual(email_doc.get("username"), self.test_user_a)
+
+        db.mark_email_applied("ceo@startup.ai", username=self.test_user_a)
+
+        if mongo is not None:
+            applied_doc = mongo.applied_emails.find_one({"email": "ceo@startup.ai"})
+            self.assertIsNotNone(applied_doc)
+            self.assertEqual(applied_doc.get("username"), self.test_user_a)
+            self.assertNotIn("post_text", applied_doc)
+            self.assertNotIn("body", applied_doc)
+
+
+class TestZeroDataLeakage(unittest.TestCase):
+    """Tests ensuring zero data leakage for unauthenticated requests."""
+
+    def setUp(self):
+        import server
+        self.app = server.app.test_client()
+
+    def test_unauthenticated_contacts_empty(self):
+        """No gmails or contacts leaked without sign-in."""
+        res = self.app.get("/api/contacts")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json(), [])
+
+    def test_unauthenticated_applied_emails_empty(self):
+        """No sent emails leaked without sign-in."""
+        res = self.app.get("/api/applied-emails")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json(), [])
+
+    def test_unauthenticated_drafts_empty(self):
+        """No cold email drafts leaked without sign-in."""
+        res = self.app.get("/api/emails")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json(), [])
+
+    def test_unauthenticated_profile_sanitized(self):
+        """No candidate name, phone, resume or API keys leaked without sign-in."""
+        res = self.app.get("/api/profile")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertFalse(data.get("authenticated"))
+        self.assertEqual(data.get("name"), "")
+        self.assertEqual(data.get("phone"), "")
+        self.assertEqual(data.get("gmail_sender"), "")
+        self.assertEqual(data.get("groq_api_key"), "")
+
+    def test_unauthenticated_db_status_zeroes(self):
+        """Counts are strictly zero without sign-in."""
+        res = self.app.get("/api/db-status")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertFalse(data.get("authenticated"))
+        self.assertEqual(data.get("pending_count"), 0)
+        self.assertEqual(data.get("sent_count"), 0)
+
+    def test_spoofed_legacy_header_blocked(self):
+        """Sending X-User-Name: legacy is rejected to prevent pre-migration data leakage."""
+        res = self.app.get("/api/contacts", headers={"X-User-Name": "legacy"})
+        self.assertEqual(res.get_json(), [])
+
+    def test_action_endpoints_require_auth(self):
+        """Unauthenticated mutation attempts return 401 Unauthorized."""
+        self.assertEqual(self.app.post("/api/generate", json={}).status_code, 401)
+        self.assertEqual(self.app.post("/api/send", json={}).status_code, 401)
+        self.assertEqual(self.app.post("/api/scrape", json={}).status_code, 401)
+        self.assertEqual(self.app.post("/api/contacts/clear").status_code, 401)
 
 
 if __name__ == "__main__":

@@ -8,13 +8,37 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
+from string import Template
 from typing import Dict, Any, List, Optional
 import requests
 
 logger = logging.getLogger("autoapply.scorer")
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "qwen/qwen3.8-27b"
+# Load from config so there is a single source of truth
+try:
+    from config import GROQ_URL, DEFAULT_MODEL as MODEL
+except ImportError:
+    GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+    MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+
+# Prompt file for LLM requirement extraction
+_PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "relevance_extract.txt"
+
+
+def _load_extraction_prompt(post_text: str) -> str:
+    """Load and render the requirement-extraction prompt from prompts/relevance_extract.txt."""
+    if _PROMPT_FILE.exists():
+        template_src = _PROMPT_FILE.read_text(encoding="utf-8")
+        return Template(template_src).safe_substitute(post_text=post_text[:2500])
+    # Inline fallback if prompt file is missing
+    logger.warning("prompts/relevance_extract.txt not found — using inline fallback.")
+    return (
+        "Extract structured job requirements from this LinkedIn post. "
+        "Output ONLY valid JSON with keys: min_experience_years, max_experience_years, "
+        "required_skills, role_domain, work_mode, urgency.\n\n"
+        f'Post:\n"""{post_text[:2500]}"""'
+    )
 
 
 def parse_candidate_years(exp_str: str) -> float:
@@ -59,25 +83,7 @@ def extract_post_requirements(post_text: str, hr_title: str = "") -> Dict[str, A
     if not api_key:
         return _regex_fallback_extract(post_text, hr_title)
 
-    prompt = f"""You are an expert recruiter parser. Extract structured job requirements from the following LinkedIn post snippet.
-
-CRITICAL RULES:
-1. ONLY extract requirements that are EXPLICITLY stated or strongly implied in the text.
-2. If experience years are NOT mentioned, return min_experience_years: null.
-3. If work mode (remote/hybrid/onsite) is NOT mentioned, return work_mode: null.
-4. Extract only key technical skills mentioned (e.g. Python, PyTorch, React, Docker).
-5. Output ONLY valid JSON matching this schema:
-{{
-  "min_experience_years": float or null,
-  "max_experience_years": float or null,
-  "required_skills": ["skill1", "skill2"],
-  "role_domain": "string or null",
-  "work_mode": "remote" or "hybrid" or "onsite" or null,
-  "urgency": "immediate" or "15 days" or null
-}}
-
-LinkedIn Post Snippet:
-\"\"\"{post_text[:2500]}\"\"\""""
+    prompt = _load_extraction_prompt(post_text)
 
     payload = {
         "model": MODEL,

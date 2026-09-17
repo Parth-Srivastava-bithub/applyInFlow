@@ -14,16 +14,14 @@ from urllib.parse import quote_plus
 from typing import List, Dict, Any, Set
 from playwright.async_api import async_playwright, Page
 
+from pipeline.name_cleaner import clean_name
+from config import JUNK_EMAIL_ADDRESSES as JUNK_EMAILS
+
 logger = logging.getLogger("linkedin_posts_scraper")
 
 GMAIL_RE = re.compile(r'\b[A-Za-z0-9._%+\-]+@gmail\.com\b', re.I)
 EMAIL_RE = re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,7}\b', re.I)
 
-JUNK_EMAILS = {
-    'firstname.lastname@gmail.com', 'yourname@gmail.com', 'example@gmail.com',
-    'name@gmail.com', 'xyz@gmail.com', 'abc@gmail.com', 'test@gmail.com',
-    'sample@gmail.com', 'email@gmail.com', 'partyanimal@gmail.com'
-}
 
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -241,7 +239,7 @@ async def scrape_posts(
 
                 existing_emails.add(email_clean)
                 record = {
-                    "name":         post.get("name") or "Unknown",
+                    "name":         clean_name(post.get("name") or "Unknown"),
                     "title":        post.get("title") or "",
                     "linkedin_url": post.get("profile_url") or "",
                     "post_text":    post.get("post_text", "")[:600],

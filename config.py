@@ -1,7 +1,14 @@
 """Configuration settings for LinkedIn Playwright Scraper."""
 
+import os
 import re
 from pathlib import Path
+
+# ── Groq / OpenAI API ────────────────────────────────────────────────────────
+GROQ_URL    = "https://api.groq.com/openai/v1/chat/completions"
+OPENAI_URL  = "https://api.openai.com/v1/chat/completions"
+DEFAULT_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+
 
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -20,8 +27,18 @@ DEFAULT_USER_DATA_DIR = BASE_DIR / "browser_profile"
 PAGE_LOAD_TIMEOUT = 30000  # 30 seconds in ms
 MIN_DELAY = 2.5
 MAX_DELAY = 5.0
+MIN_DELAY_JOBS = 2.0   # Jobs scraper (slightly faster, less profile detail needed)
+MAX_DELAY_JOBS = 4.0
 SEARCH_PAGE_DELAY = 3.0
 MAX_RETRIES = 3
+
+# Email addresses that are clearly fake/template — filtered out during scraping
+JUNK_EMAIL_ADDRESSES = {
+    'firstname.lastname@gmail.com', 'yourname@gmail.com', 'example@gmail.com',
+    'name@gmail.com', 'xyz@gmail.com', 'abc@gmail.com', 'test@gmail.com',
+    'sample@gmail.com', 'email@gmail.com', 'partyanimal@gmail.com'
+}
+
 
 # Search Queries
 DEFAULT_QUERIES = [

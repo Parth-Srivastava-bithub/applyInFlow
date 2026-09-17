@@ -1,36 +1,24 @@
 """
-AutoApply MongoDB & Local Storage Module
-Provides unified permanent storage in MongoDB collection: 'emails'
-(and local fallback: output/emails.json)
+AutoApply Multi-User MongoDB & Local Storage Module
 
-Schema for each document in 'emails':
-{
-    "email": "user@gmail.com",       # unique lowercase email identifier
-    "name": "Recruiter Name",        # resolved contact or author name
-    "title": "Talent Acquisition",   # headline or role
-    "company": "",                   # company name if extracted
-    "post_text": "...",              # context snippet from LinkedIn post
-    "linkedin_url": "...",           # profile or post url
-    "query": "...",                  # search query that found this lead
-    "is_gmail": True,                # boolean flag (@gmail.com)
-    "status": "pending",             # "pending" | "sent"
-    "created_at": "ISO-8601",        # date and time lead was extracted
-    "updated_at": "ISO-8601",        # last update timestamp
-    "sent_at": None,                 # timestamp when application email was sent
-    "subject": None,                 # cold email subject line
-    "body": None                     # cold email body text
-}
-
-Features:
-- Unified MongoDB collection 'emails' with unique index on 'email'.
-- Automatic 1-week cleanup: Purges emails with status='sent' after 7 days so they can be re-applied to.
-- Automatic migration from legacy 'hr_contacts' and 'applied_emails' collections.
+Multi-Tenant Architecture:
+- Two unified MongoDB collections partitioned by the `username` field:
+  1. `emails`: Full contact record with all context (name, email, title, company,
+     post_text, linkedin_url, query, status, created_at, updated_at, username).
+     Capacity limit: 100 entries per username (FIFO: oldest deleted when limit exceeded).
+  2. `applied_emails`: Minimal record containing strictly ONLY `username`, `email`,
+     and `sent_at` timestamp. Strictly NO CONTEXT (no post_text, no resume, no body).
+     Capacity limit: 200 entries per username (FIFO: oldest deleted when limit exceeded).
+- Existing historical data is migrated to `username: "legacy"` in both collections.
+- No original records are deleted.
 """
 
 import os
+import re
 import json
+import time
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Set, Optional
 from urllib.parse import quote_plus
@@ -42,15 +30,48 @@ logger = logging.getLogger("autoapply.db")
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-LOCAL_EMAILS_FILE   = OUTPUT_DIR / "emails.json"
-LOCAL_CONTACTS_FILE = OUTPUT_DIR / "hr_gmail_posts.json"  # legacy compatibility
-LOCAL_SENT_FILE     = OUTPUT_DIR / "sent_log.json"        # legacy compatibility
+USERS_DIR = OUTPUT_DIR / "users"
+USERS_DIR.mkdir(exist_ok=True)
 
-# ── MongoDB Client Setup ──────────────────────────────────────────────────────
+# Legacy file paths for backward compatibility
+LOCAL_EMAILS_FILE   = OUTPUT_DIR / "emails.json"
+LOCAL_CONTACTS_FILE = OUTPUT_DIR / "hr_gmail_posts.json"
+LOCAL_SENT_FILE     = OUTPUT_DIR / "sent_log.json"
+
+PENDING_LIMIT = 100
+SENT_LIMIT = 200
+
+EMAILS_COLLECTION = "emails"
+APPLIED_COLLECTION = "applied_emails"
+
+# ── MongoDB Client State ──────────────────────────────────────────────────────
 _mongo_client = None
 _db = None
 _is_connected = False
 _migration_done = False
+
+
+def sanitize_username(username: Optional[str]) -> str:
+    """
+    Sanitizes a username or email address into a safe MongoDB username value.
+    E.g. 'parthsrivastava6112004@gmail.com' -> 'parthsrivastava6112004_gmail_com'
+    'Alex-Dev' -> 'alex_dev'
+    Empty/None -> 'legacy'
+    """
+    if not username:
+        return "legacy"
+    s = str(username).strip().lower()
+    clean = re.sub(r'[^a-z0-9_-]', '_', s)
+    clean = re.sub(r'_+', '_', clean).strip('_')
+    return clean or "legacy"
+
+
+def get_pending_collection_name(username: Optional[str] = "legacy") -> str:
+    return EMAILS_COLLECTION
+
+
+def get_sent_collection_name(username: Optional[str] = "legacy") -> str:
+    return APPLIED_COLLECTION
 
 
 def get_mongo_db():
@@ -91,16 +112,13 @@ def get_mongo_db():
         _is_connected = True
         logger.info(f"MongoDB: Connected successfully to database '{db_name}'.")
 
-        # Setup indexes on unified 'emails' collection
-        _db.emails.create_index("email", unique=True)
-        _db.emails.create_index("status")
-        _db.emails.create_index("sent_at")
-        _db.emails.create_index("created_at")
-
-        # Run automatic migration from legacy collections if needed
+        # Run automatic legacy migration if needed
         if not _migration_done:
-            migrate_to_unified_emails(_db)
             _migration_done = True
+            try:
+                migrate_legacy_data(_db)
+            except Exception as e:
+                logger.warning(f"Error during legacy migration: {e}")
 
         return _db
     except Exception as e:
@@ -115,10 +133,6 @@ def is_db_connected() -> bool:
 
 
 def reset_mongo_connection():
-    """
-    Closes any existing MongoDB connection and resets cached client state.
-    Attempts reconnect immediately using the latest environment variables.
-    """
     global _mongo_client, _db, _is_connected, _migration_done
     if _mongo_client is not None:
         try:
@@ -132,7 +146,7 @@ def reset_mongo_connection():
     return get_mongo_db()
 
 
-# ── Helpers for Local Files ──────────────────────────────────────────────────
+# ── Local File Helpers ────────────────────────────────────────────────────────
 
 def _load_local_json(path: Path, default=None):
     if path.exists():
@@ -145,220 +159,144 @@ def _load_local_json(path: Path, default=None):
 
 def _save_local_json(path: Path, data):
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.error(f"Failed to write local file {path}: {e}")
 
 
-# ── Migration from Legacy Collections ─────────────────────────────────────────
+def _get_user_dir(username: Optional[str]) -> Path:
+    u = sanitize_username(username)
+    d = USERS_DIR / u
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
-def migrate_to_unified_emails(db=None):
+
+def _get_user_pending_file(username: Optional[str]) -> Path:
+    return _get_user_dir(username) / "pending.json"
+
+
+def _get_user_sent_file(username: Optional[str]) -> Path:
+    return _get_user_dir(username) / "sent.json"
+
+
+# ── Capacity & FIFO Enforcement Helpers ──────────────────────────────────────
+
+def _enforce_mongo_cap(col, max_limit: int, sort_field: str = "created_at", username: Optional[str] = None):
     """
-    Migrates existing data from legacy 'hr_contacts' and 'applied_emails'
-    into the new unified 'emails' collection. Preserves original collections as backup.
+    Enforces FIFO cap for a specific username in the shared collection.
+    If total documents for this username > max_limit, deletes the oldest records by sort_field ascending.
+    """
+    try:
+        query = {"username": sanitize_username(username)} if username else {}
+        count = col.count_documents(query)
+        if count > max_limit:
+            excess = count - max_limit
+            oldest_docs = list(col.find(query, {"_id": 1}).sort([(sort_field, 1), ("_id", 1)]).limit(excess))
+            if oldest_docs:
+                oldest_ids = [d["_id"] for d in oldest_docs]
+                res = col.delete_many({"_id": {"$in": oldest_ids}})
+                logger.info(f"Enforced FIFO cap on {col.name} for user '{username}': deleted {res.deleted_count} oldest items (limit {max_limit}).")
+    except Exception as e:
+        logger.error(f"Error enforcing FIFO cap on {col.name} for user '{username}': {e}")
+
+
+def _enforce_local_cap(path: Path, max_limit: int, sort_field: str = "created_at") -> List[Dict[str, Any]]:
+    """
+    Enforces FIFO cap on a local JSON file.
+    Sorts newest first and keeps only the latest max_limit records.
+    """
+    records = _load_local_json(path, [])
+    records.sort(key=lambda x: str(x.get(sort_field) or ""), reverse=True)
+    if len(records) > max_limit:
+        records = records[:max_limit]
+        _save_local_json(path, records)
+    return records
+
+
+# ── Legacy Data Migration ─────────────────────────────────────────────────────
+
+def migrate_legacy_data(db=None):
+    """
+    Migrates historical data in 'emails' and 'applied_emails' so every record has
+    a valid `username` field (defaulting to 'legacy').
+    Strips context from 'applied_emails' so it strictly contains username, email, sent_at.
+    Preserves all existing records.
     """
     if db is None:
         db = get_mongo_db()
+    if db is None:
+        return
 
+    try:
+        # 1. Update emails collection: tag documents missing username with 'legacy'
+        db.emails.update_many({"username": {"$exists": False}}, {"$set": {"username": "legacy"}})
+        db.emails.create_index([("username", 1), ("email", 1)], unique=True)
+        db.emails.create_index([("username", 1), ("created_at", 1)])
+
+        # 2. Update applied_emails collection: tag documents missing username with 'legacy'
+        db.applied_emails.update_many({"username": {"$exists": False}}, {"$set": {"username": "legacy"}})
+        # Strip context fields from applied_emails (strictly keep email, sent_at, username)
+        db.applied_emails.update_many(
+            {},
+            {"$unset": {"body": "", "subject": "", "post_text": "", "company": "", "name": "", "to": "", "status": ""}}
+        )
+        db.applied_emails.create_index([("username", 1), ("email", 1)], unique=True)
+        db.applied_emails.create_index([("username", 1), ("sent_at", 1)])
+
+        # 3. Clean up any temporary collections if present
+        temp_cols = [c for c in db.list_collection_names() if c.startswith("pending_") or c.startswith("sent_")]
+        for tc in temp_cols:
+            db[tc].drop()
+
+        logger.info("Database migration complete: 'emails' and 'applied_emails' indexed and partitioned by username.")
+    except Exception as e:
+        logger.error(f"Error during legacy migration: {e}")
+
+
+def migrate_to_legacy_collections(db=None):
+    """Alias for backwards compatibility."""
+    return migrate_legacy_data(db)
+
+
+# ── Ingest & Save Contacts (Pending Leads, Limit 100) ─────────────────────────
+
+def save_contacts(contacts: List[Dict[str, Any]], username: str = "legacy") -> List[Dict[str, Any]]:
+    """
+    Saves newly scraped recruiter leads into the unified `emails` collection
+    under the user's `username`.
+    Enforces a strict maximum capacity of 100 entries per username (FIFO: oldest deleted when exceeded).
+    If an email is already present in applied_emails for this username, it is skipped.
+    """
+    u = sanitize_username(username)
     now_iso = datetime.now(timezone.utc).isoformat()
-    unified_records: Dict[str, Dict[str, Any]] = {}
 
-    # 1. First load any existing records in local 'emails.json'
-    local_emails = _load_local_json(LOCAL_EMAILS_FILE, [])
-    for rec in local_emails:
-        em = (rec.get("email") or "").lower().strip()
-        if em:
-            unified_records[em] = rec
+    applied_set = get_applied_emails(username=u)
 
-    # 2. Check local sent_log.json to make sure all past sent emails are captured
-    local_sent = _load_local_json(LOCAL_SENT_FILE, [])
-    for s_rec in local_sent:
-        em = (s_rec.get("email") or s_rec.get("to") or "").lower().strip()
-        if not em:
-            continue
-        unified_records[em] = {
-            **(unified_records.get(em) or {}),
-            "email": em,
-            "name": s_rec.get("name") or (unified_records.get(em) or {}).get("name") or "Recruiter",
-            "title": (unified_records.get(em) or {}).get("title") or "Talent Acquisition / HR",
-            "company": (unified_records.get(em) or {}).get("company") or "",
-            "post_text": (unified_records.get(em) or {}).get("post_text") or "",
-            "linkedin_url": (unified_records.get(em) or {}).get("linkedin_url") or "",
-            "query": (unified_records.get(em) or {}).get("query") or "",
-            "is_gmail": em.endswith("@gmail.com"),
-            "status": "sent",
-            "created_at": s_rec.get("sent_at") or (unified_records.get(em) or {}).get("created_at") or now_iso,
-            "updated_at": now_iso,
-            "sent_at": s_rec.get("sent_at") or (unified_records.get(em) or {}).get("sent_at") or now_iso,
-            "subject": s_rec.get("subject") or (unified_records.get(em) or {}).get("subject") or "",
-            "body": s_rec.get("body") or (unified_records.get(em) or {}).get("body") or "",
-        }
+    # 1. Load existing pending records for this user
+    local_pending_file = _get_user_pending_file(u)
+    existing_pending = {e["email"]: e for e in get_pending_gmails(username=u)}
 
-    # 3. Check MongoDB legacy collections
-    if db is not None:
-        try:
-            # Check applied_emails
-            for app_doc in db.applied_emails.find({}, {"_id": 0}):
-                em = (app_doc.get("email") or app_doc.get("to") or "").lower().strip()
-                if not em:
-                    continue
-                unified_records[em] = {
-                    **(unified_records.get(em) or {}),
-                    "email": em,
-                    "name": app_doc.get("name") or (unified_records.get(em) or {}).get("name") or "",
-                    "title": app_doc.get("title") or (unified_records.get(em) or {}).get("title") or "Talent Acquisition / HR",
-                    "company": app_doc.get("company") or (unified_records.get(em) or {}).get("company") or "",
-                    "post_text": app_doc.get("post_text") or (unified_records.get(em) or {}).get("post_text") or "",
-                    "linkedin_url": app_doc.get("linkedin_url") or (unified_records.get(em) or {}).get("linkedin_url") or "",
-                    "query": app_doc.get("query") or (unified_records.get(em) or {}).get("query") or "",
-                    "is_gmail": em.endswith("@gmail.com"),
-                    "status": "sent",
-                    "created_at": app_doc.get("sent_at") or (unified_records.get(em) or {}).get("created_at") or now_iso,
-                    "updated_at": now_iso,
-                    "sent_at": app_doc.get("sent_at") or (unified_records.get(em) or {}).get("sent_at") or now_iso,
-                    "subject": app_doc.get("subject") or (unified_records.get(em) or {}).get("subject") or "",
-                    "body": app_doc.get("body") or (unified_records.get(em) or {}).get("body") or "",
-                }
-
-            # Check hr_contacts
-            for hr_doc in db.hr_contacts.find({}, {"_id": 0}):
-                em = (hr_doc.get("email") or hr_doc.get("hr_email") or hr_doc.get("gmail") or "").lower().strip()
-                if not em:
-                    continue
-                if em in unified_records:
-                    for k in ("name", "title", "company", "post_text", "linkedin_url", "query"):
-                        if hr_doc.get(k) and not unified_records[em].get(k):
-                            unified_records[em][k] = hr_doc[k]
-                else:
-                    unified_records[em] = {
-                        "email": em,
-                        "name": hr_doc.get("name") or "Recruiter",
-                        "title": hr_doc.get("title") or "Talent Acquisition / HR",
-                        "company": hr_doc.get("company") or "",
-                        "post_text": hr_doc.get("post_text") or "",
-                        "linkedin_url": hr_doc.get("linkedin_url") or "",
-                        "query": hr_doc.get("query") or "",
-                        "is_gmail": em.endswith("@gmail.com"),
-                        "status": "pending",
-                        "created_at": hr_doc.get("updated_at") or now_iso,
-                        "updated_at": hr_doc.get("updated_at") or now_iso,
-                        "sent_at": None,
-                        "subject": None,
-                        "body": None,
-                    }
-
-            # Bulk upsert into db.emails (ensure 'sent' status is preserved)
-            if unified_records:
-                from pymongo import UpdateOne
-                ops = []
-                for doc in unified_records.values():
-                    if doc.get("status") == "sent":
-                        ops.append(UpdateOne(
-                            {"email": doc["email"]},
-                            {
-                                "$setOnInsert": {"created_at": doc["created_at"]},
-                                "$set": {
-                                    "status": "sent",
-                                    "sent_at": doc["sent_at"],
-                                    "name": doc.get("name") or "",
-                                    "title": doc.get("title") or "",
-                                    "company": doc.get("company") or "",
-                                    "is_gmail": doc.get("is_gmail", True),
-                                    "updated_at": doc["updated_at"],
-                                    "subject": doc.get("subject") or "",
-                                }
-                            },
-                            upsert=True
-                        ))
-                    else:
-                        ops.append(UpdateOne({"email": doc["email"]}, {"$setOnInsert": doc}, upsert=True))
-
-                res = db.emails.bulk_write(ops, ordered=False)
-                logger.info(f"Unified 'emails' collection ready: {len(unified_records)} total records (upserted {res.upserted_count}).")
-        except Exception as e:
-            logger.error(f"Error during legacy migration to MongoDB 'emails': {e}")
-
-    # Also sync to local JSON
-    _save_local_json(LOCAL_EMAILS_FILE, list(unified_records.values()))
-
-
-# ── 1-Week Sent Email Cleanup ────────────────────────────────────────────────
-
-def cleanup_expired_sent_emails(days: int = 7) -> int:
-    """
-    Finds any email with status='sent' whose sent_at date is older than `days` days,
-    and removes it from the 'emails' collection and local JSON.
-    This allows re-applying to recruiters if they post new opportunities in the future.
-    Returns the number of deleted records.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    cutoff_iso = cutoff.isoformat()
-    removed_count = 0
-
-    # 1. Cleanup in MongoDB
-    db = get_mongo_db()
-    if db is not None:
-        try:
-            # Query for status == "sent" and sent_at <= cutoff_iso
-            res = db.emails.delete_many({
-                "status": "sent",
-                "sent_at": {"$lte": cutoff_iso, "$ne": None}
-            })
-            removed_count = res.deleted_count
-            if removed_count > 0:
-                logger.info(f"MongoDB: Removed {removed_count} sent emails older than {days} days from 'emails'.")
-        except Exception as e:
-            logger.error(f"Error running 1-week cleanup on MongoDB: {e}")
-
-    # 2. Cleanup in local storage
-    local_records = _load_local_json(LOCAL_EMAILS_FILE, [])
-    kept_records = []
-    local_removed = 0
-    for r in local_records:
-        if r.get("status") == "sent" and r.get("sent_at"):
-            sent_str = str(r["sent_at"])
-            try:
-                sent_dt = datetime.fromisoformat(sent_str.replace("Z", "+00:00"))
-                if sent_dt <= cutoff:
-                    local_removed += 1
-                    continue
-            except Exception:
-                pass
-        kept_records.append(r)
-
-    if local_removed > 0:
-        _save_local_json(LOCAL_EMAILS_FILE, kept_records)
-        logger.info(f"Local storage: Removed {local_removed} expired sent emails.")
-
-    return max(removed_count, local_removed)
-
-
-# ── Ingest & Save Contacts ───────────────────────────────────────────────────
-
-def save_contacts(contacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Saves and deduplicates newly scraped contacts into the 'emails' collection.
-    - If email already exists with status='sent', preserves 'sent' status.
-    - If email already exists with status='pending', updates metadata without resetting created_at.
-    - If email is brand new, creates document with status='pending' and created_at=now.
-    Runs 1-week cleanup at the end of each save.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    existing = {e["email"]: e for e in get_all_emails()}
-
-    updated_or_new = []
-    for c in contacts:
+    new_or_updated = []
+    base_epoch = time.time()
+    for idx, c in enumerate(contacts):
         raw_email = c.get("hr_email") or c.get("gmail") or c.get("email") or ""
         clean_email = raw_email.lower().strip()
         if not clean_email or "@" not in clean_email:
             continue
 
+        # Strictly skip if already sent by this user
+        if clean_email in applied_set:
+            continue
+
         is_gmail = clean_email.endswith("@gmail.com")
-        existing_doc = existing.get(clean_email)
+        existing_doc = existing_pending.get(clean_email)
+        item_iso = datetime.fromtimestamp(base_epoch + (idx * 0.001), tz=timezone.utc).isoformat()
 
         if existing_doc:
             doc = {
                 **existing_doc,
+                "username": u,
                 "name": c.get("name") or existing_doc.get("name") or "Recruiter",
                 "title": c.get("title") or existing_doc.get("title") or "",
                 "company": c.get("company") or existing_doc.get("company") or "",
@@ -366,10 +304,12 @@ def save_contacts(contacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "linkedin_url": c.get("linkedin_url") or existing_doc.get("linkedin_url") or "",
                 "query": c.get("query") or existing_doc.get("query") or "",
                 "is_gmail": is_gmail,
-                "updated_at": now_iso,
+                "status": "pending",
+                "updated_at": item_iso,
             }
         else:
             doc = {
+                "username": u,
                 "email": clean_email,
                 "name": c.get("name") or "Recruiter",
                 "title": c.get("title") or "Talent Acquisition / HR",
@@ -379,331 +319,340 @@ def save_contacts(contacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "query": c.get("query") or "",
                 "is_gmail": is_gmail,
                 "status": "pending",
-                "created_at": now_iso,
-                "updated_at": now_iso,
-                "sent_at": None,
-                "subject": None,
-                "body": None,
+                "created_at": item_iso,
+                "updated_at": item_iso,
             }
 
-        existing[clean_email] = doc
-        updated_or_new.append(doc)
+        existing_pending[clean_email] = doc
+        new_or_updated.append(doc)
 
-    all_emails_list = list(existing.values())
-    _save_local_json(LOCAL_EMAILS_FILE, all_emails_list)
-    _save_local_json(LOCAL_CONTACTS_FILE, all_emails_list)
-
-    # Sync to MongoDB Atlas
+    # 2. Sync to MongoDB Atlas
     db = get_mongo_db()
-    if db is not None and updated_or_new:
+    if db is not None and new_or_updated:
         try:
             from pymongo import UpdateOne
-            operations = []
-            for doc in updated_or_new:
-                update_fields = {k: v for k, v in doc.items() if k not in ("_id", "email")}
-                if doc.get("status") == "pending":
-                    operations.append(UpdateOne(
-                        {"email": doc["email"]},
-                        {
-                            "$setOnInsert": {"created_at": doc["created_at"], "status": "pending"},
-                            "$set": {
-                                "name": doc["name"],
-                                "title": doc["title"],
-                                "company": doc["company"],
-                                "post_text": doc["post_text"],
-                                "linkedin_url": doc["linkedin_url"],
-                                "query": doc["query"],
-                                "is_gmail": doc["is_gmail"],
-                                "updated_at": doc["updated_at"],
-                            }
-                        },
-                        upsert=True
-                    ))
-                else:
-                    operations.append(UpdateOne(
-                        {"email": doc["email"]},
-                        {"$set": update_fields},
-                        upsert=True
-                    ))
+            p_col = db[EMAILS_COLLECTION]
+            p_col.create_index([("username", 1), ("email", 1)], unique=True)
+            p_col.create_index([("username", 1), ("created_at", 1)])
 
-            if operations:
-                db.emails.bulk_write(operations, ordered=False)
-                logger.info(f"MongoDB: Upserted {len(operations)} contacts into 'emails'.")
+            ops = []
+            for doc in new_or_updated:
+                doc["username"] = u
+                update_fields = {k: v for k, v in doc.items() if k not in ("_id", "email", "username", "status", "created_at")}
+                ops.append(UpdateOne(
+                    {"username": u, "email": doc["email"]},
+                    {
+                        "$setOnInsert": {"username": u, "created_at": doc["created_at"], "status": "pending"},
+                        "$set": update_fields,
+                    },
+                    upsert=True
+                ))
+
+            if ops:
+                p_col.bulk_write(ops, ordered=False)
+                # Enforce strict 100 capacity limit for this user
+                _enforce_mongo_cap(p_col, PENDING_LIMIT, "created_at", username=u)
         except Exception as e:
-            logger.error(f"Error syncing contacts to MongoDB 'emails': {e}")
+            logger.error(f"Error syncing contacts to MongoDB '{EMAILS_COLLECTION}' for '{u}': {e}")
 
-    # Run 1-week cleanup at the end of scraping/saving
-    cleanup_expired_sent_emails(days=7)
+    # 3. Enforce limit locally and save
+    all_pending = list(existing_pending.values())
+    all_pending.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    all_pending = all_pending[:PENDING_LIMIT]
+    _save_local_json(local_pending_file, all_pending)
 
-    return all_emails_list
+    # If legacy user, also sync legacy files for backwards compatibility
+    if u == "legacy":
+        _save_local_json(LOCAL_EMAILS_FILE, all_pending)
+        _save_local_json(LOCAL_CONTACTS_FILE, all_pending)
+
+    return all_pending
 
 
-# ── Querying Emails ──────────────────────────────────────────────────────────
+# ── Mark Email Applied (Sent Log, Limit 200, NO CONTEXT) ──────────────────────
 
-def get_all_emails() -> List[Dict[str, Any]]:
+def mark_email_applied(email: str, name: str = "", subject: str = "", body: str = "", username: str = "legacy") -> bool:
     """
-    Returns all email records from MongoDB 'emails' collection (or local JSON fallback).
-    """
-    emails_dict = {}
-
-    # 1. Local fallback
-    local_data = _load_local_json(LOCAL_EMAILS_FILE, [])
-    for d in local_data:
-        em = (d.get("email") or "").lower().strip()
-        if em:
-            emails_dict[em] = d
-
-    # 2. MongoDB Atlas
-    db = get_mongo_db()
-    if db is not None:
-        try:
-            for doc in db.emails.find({}, {"_id": 0}):
-                em = (doc.get("email") or "").lower().strip()
-                if em:
-                    emails_dict[em] = {**emails_dict.get(em, {}), **doc}
-        except Exception as e:
-            logger.error(f"Error reading from MongoDB 'emails': {e}")
-
-    return list(emails_dict.values())
-
-
-def get_pending_gmails() -> List[Dict[str, Any]]:
-    """
-    Returns ONLY non-applied (pending) Gmail addresses (@gmail.com).
-    Ideal for the streamlined right sidebar!
-    """
-    all_emails = get_all_emails()
-    pending_gmails = []
-    for doc in all_emails:
-        em = (doc.get("email") or "").lower().strip()
-        status = doc.get("status", "pending")
-        is_gmail = doc.get("is_gmail") or em.endswith("@gmail.com")
-        if status == "pending" and is_gmail:
-            doc_copy = dict(doc)
-            doc_copy["hr_email"] = em
-            doc_copy["gmail"] = em
-            doc_copy["is_applied"] = False
-            pending_gmails.append(doc_copy)
-
-    # Sort newest created first
-    pending_gmails.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-    return pending_gmails
-
-
-def get_all_contacts() -> List[Dict[str, Any]]:
-    """
-    Backwards compatibility: Returns all contacts with 'is_applied' boolean.
-    """
-    all_records = get_all_emails()
-    res = []
-    for r in all_records:
-        doc = dict(r)
-        em = (doc.get("email") or "").lower().strip()
-        doc["hr_email"] = em
-        doc["gmail"] = em
-        doc["is_applied"] = (doc.get("status") == "sent")
-        res.append(doc)
-    return res
-
-
-def get_applied_emails() -> Set[str]:
-    """
-    Returns a set of all lowercase email addresses that have status='sent'.
-    """
-    all_records = get_all_emails()
-    return {
-        r["email"].lower().strip()
-        for r in all_records
-        if r.get("status") == "sent" and r.get("email")
-    }
-
-
-def get_sent_emails() -> List[Dict[str, Any]]:
-    """
-    Returns all email records that have status='sent', sorted newest sent first.
-    """
-    all_emails = get_all_emails()
-    sent_dict = {}
-    for doc in all_emails:
-        em = (doc.get("email") or "").lower().strip()
-        status = doc.get("status", "pending")
-        if status == "sent" and em:
-            doc_copy = dict(doc)
-            doc_copy["hr_email"] = em
-            doc_copy["gmail"] = em
-            doc_copy["is_applied"] = True
-            sent_dict[em] = doc_copy
-
-    # Also include any in local sent_log.json
-    for r in _load_local_json(LOCAL_SENT_FILE, []):
-        em = (r.get("email") or r.get("to") or "").lower().strip()
-        if em and em not in sent_dict:
-            sent_dict[em] = {
-                "email": em,
-                "name": r.get("name") or "Recruiter",
-                "title": "Talent Acquisition / HR",
-                "status": "sent",
-                "sent_at": r.get("sent_at"),
-                "subject": r.get("subject") or "Cold Outreach Application",
-                "is_applied": True,
-                "is_gmail": em.endswith("@gmail.com"),
-            }
-
-    sent_list = list(sent_dict.values())
-    sent_list.sort(key=lambda x: x.get("sent_at") or x.get("updated_at") or "", reverse=True)
-    return sent_list
-
-
-def is_email_applied(email: str) -> bool:
-    """
-    Ultra-strict check: returns True if this email has already been sent to
-    across MongoDB (emails & applied_emails) or any local storage logs.
+    Marks an email as sent for the given user.
+    - Adds minimal record { "username": u, "email": clean, "sent_at": now_iso } to `applied_emails`.
+      Strictly NO CONTEXT (no post_text, no body, no resume).
+    - Removes the contact from `emails` for this user.
+    - Enforces a strict maximum capacity of 200 entries per username (FIFO: oldest deleted when exceeded).
     """
     clean = (email or "").lower().strip()
     if not clean:
         return False
 
-    # 1. MongoDB Atlas checks
-    db = get_mongo_db()
-    if db is not None:
-        try:
-            # Check emails collection
-            doc = db.emails.find_one({"email": clean, "status": "sent"}, {"_id": 1})
-            if doc is not None:
-                return True
-            # Check legacy applied_emails collection
-            if db.applied_emails.find_one({"email": clean}, {"_id": 1}) is not None:
-                return True
-        except Exception as e:
-            logger.error(f"Error checking is_email_applied in Mongo: {e}")
-
-    # 2. Local emails.json
-    local_emails = _load_local_json(LOCAL_EMAILS_FILE, [])
-    if any((r.get("email") or "").lower().strip() == clean and r.get("status") == "sent" for r in local_emails):
-        return True
-
-    # 3. Local sent_log.json
-    local_sent = _load_local_json(LOCAL_SENT_FILE, [])
-    if any((r.get("email") or r.get("to") or "").lower().strip() == clean for r in local_sent):
-        return True
-
-    # 4. Local cold_emails.json drafts
-    cold_drafts = _load_local_json(OUTPUT_DIR / "cold_emails.json", [])
-    if any((r.get("to_email") or "").lower().strip() == clean and r.get("status") == "sent" for r in cold_drafts):
-        return True
-
-    return False
-
-
-def mark_email_applied(email: str, name: str = "", subject: str = "", body: str = "") -> bool:
-    """
-    Marks an email as 'sent' in MongoDB 'emails' collection and local JSON.
-    Sets sent_at to the current UTC timestamp.
-    """
-    clean = (email or "").lower().strip()
-    if not clean:
-        return False
-
+    u = sanitize_username(username)
     now_iso = datetime.now(timezone.utc).isoformat()
-    fields = {
-        "status": "sent",
-        "sent_at": now_iso,
-        "updated_at": now_iso,
-        "subject": subject,
-        "body": body,
-    }
-    if name:
-        fields["name"] = name
 
     # 1. Update MongoDB Atlas
     db = get_mongo_db()
     if db is not None:
         try:
-            db.emails.update_one(
-                {"email": clean},
-                {
-                    "$set": fields,
-                    "$setOnInsert": {
-                        "email": clean,
-                        "created_at": now_iso,
-                        "is_gmail": clean.endswith("@gmail.com"),
-                        "title": "Talent Acquisition / HR",
-                    }
-                },
+            s_col = db[APPLIED_COLLECTION]
+            s_col.create_index([("username", 1), ("email", 1)], unique=True)
+            s_col.create_index([("username", 1), ("sent_at", 1)])
+
+            # Store ONLY username, email, and sent_at — strictly NO CONTEXT
+            s_col.update_one(
+                {"username": u, "email": clean},
+                {"$set": {"username": u, "email": clean, "sent_at": now_iso}},
                 upsert=True
             )
-            # Legacy applied_emails collection sync
-            db.applied_emails.update_one(
-                {"email": clean},
-                {"$set": {"email": clean, "to": clean, "name": name, "subject": subject, "sent_at": now_iso, "status": "sent"}},
-                upsert=True
-            )
-            logger.info(f"MongoDB: Marked {clean} as 'sent' in 'emails' collection.")
+
+            # Remove from emails collection for this user
+            p_col = db[EMAILS_COLLECTION]
+            p_col.delete_one({"username": u, "email": clean})
+
+            # Enforce 200 limit on applied_emails for this user
+            _enforce_mongo_cap(s_col, SENT_LIMIT, "sent_at", username=u)
+            logger.info(f"MongoDB: Recorded sent email {clean} for '{u}' in '{APPLIED_COLLECTION}' (no context) & removed from pending.")
         except Exception as e:
-            logger.error(f"Error marking email applied in MongoDB: {e}")
+            logger.error(f"Error marking email applied in MongoDB '{APPLIED_COLLECTION}': {e}")
 
     # 2. Update local storage
-    local_emails = _load_local_json(LOCAL_EMAILS_FILE, [])
-    found = False
-    for r in local_emails:
-        if (r.get("email") or "").lower().strip() == clean:
-            r.update(fields)
-            found = True
-            break
-    if not found:
-        local_emails.append({
-            "email": clean,
-            "created_at": now_iso,
-            "is_gmail": clean.endswith("@gmail.com"),
-            "title": "Talent Acquisition / HR",
-            **fields
-        })
-    _save_local_json(LOCAL_EMAILS_FILE, local_emails)
+    # Remove from local pending
+    local_pending_file = _get_user_pending_file(u)
+    pending_records = _load_local_json(local_pending_file, [])
+    pending_records = [r for r in pending_records if (r.get("email") or "").lower().strip() != clean]
+    _save_local_json(local_pending_file, pending_records)
 
-    # Legacy sent_log.json
-    local_sent = _load_local_json(LOCAL_SENT_FILE, [])
-    if not any((r.get("to") or r.get("email") or "").lower().strip() == clean for r in local_sent):
-        local_sent.append({"email": clean, "to": clean, "name": name, "subject": subject, "sent_at": now_iso, "status": "sent"})
-        _save_local_json(LOCAL_SENT_FILE, local_sent)
+    # Add to local sent (minimal record: username + email + sent_at only)
+    local_sent_file = _get_user_sent_file(u)
+    sent_records = _load_local_json(local_sent_file, [])
+    sent_records = [r for r in sent_records if (r.get("email") or "").lower().strip() != clean]
+    sent_records.insert(0, {"username": u, "email": clean, "sent_at": now_iso})
+    # Enforce 200 limit locally
+    if len(sent_records) > SENT_LIMIT:
+        sent_records = sent_records[:SENT_LIMIT]
+    _save_local_json(local_sent_file, sent_records)
+
+    # Backward compatibility for legacy user
+    if u == "legacy":
+        local_sent_legacy = _load_local_json(LOCAL_SENT_FILE, [])
+        if not any((r.get("email") or r.get("to") or "").lower().strip() == clean for r in local_sent_legacy):
+            local_sent_legacy.insert(0, {"email": clean, "to": clean, "name": name, "subject": subject, "sent_at": now_iso, "status": "sent"})
+            _save_local_json(LOCAL_SENT_FILE, local_sent_legacy[:SENT_LIMIT])
 
     return True
 
 
-def delete_email(email: str) -> bool:
-    """Deletes a contact by email from both MongoDB and local JSON."""
+# ── Checking Applied Status ───────────────────────────────────────────────────
+
+def is_email_applied(email: str, username: str = "legacy") -> bool:
+    """
+    Checks whether this email has already been sent to by the given user.
+    Inspects `applied_emails` where username == u and local user sent JSON.
+    """
     clean = (email or "").lower().strip()
     if not clean:
         return False
 
+    u = sanitize_username(username)
+
+    # 1. MongoDB check
     db = get_mongo_db()
     if db is not None:
         try:
-            db.emails.delete_one({"email": clean})
+            s_col = db[APPLIED_COLLECTION]
+            if s_col.find_one({"username": u, "email": clean}, {"_id": 1}) is not None:
+                return True
         except Exception as e:
-            logger.error(f"Error deleting email from MongoDB: {e}")
+            logger.error(f"Error checking is_email_applied in Mongo: {e}")
 
-    local_emails = _load_local_json(LOCAL_EMAILS_FILE, [])
-    filtered = [r for r in local_emails if (r.get("email") or "").lower().strip() != clean]
-    _save_local_json(LOCAL_EMAILS_FILE, filtered)
+    # 2. Local user sent file check
+    user_sent = _load_local_json(_get_user_sent_file(u), [])
+    if any((r.get("email") or "").lower().strip() == clean for r in user_sent):
+        return True
 
-    legacy = _load_local_json(LOCAL_CONTACTS_FILE, [])
-    _save_local_json(LOCAL_CONTACTS_FILE, [r for r in legacy if (r.get("hr_email") or r.get("gmail") or r.get("email") or "").lower().strip() != clean])
+    # 3. Legacy file fallback
+    if u == "legacy":
+        legacy_sent = _load_local_json(LOCAL_SENT_FILE, [])
+        if any((r.get("email") or r.get("to") or "").lower().strip() == clean for r in legacy_sent):
+            return True
+
+    return False
+
+
+# ── Querying Leads & Emails ───────────────────────────────────────────────────
+
+def get_pending_gmails(username: str = "legacy") -> List[Dict[str, Any]]:
+    """
+    Returns pending Gmail addresses for the given user, sorted newest first.
+    Capacity capped at 100.
+    """
+    u = sanitize_username(username)
+    records_dict: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Local storage
+    for r in _load_local_json(_get_user_pending_file(u), []):
+        em = (r.get("email") or "").lower().strip()
+        if em:
+            records_dict[em] = r
+
+    # 2. MongoDB
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            p_col = db[EMAILS_COLLECTION]
+            for doc in p_col.find({"username": u}, {"_id": 0}):
+                em = (doc.get("email") or "").lower().strip()
+                if em:
+                    records_dict[em] = {**records_dict.get(em, {}), **doc}
+        except Exception as e:
+            logger.error(f"Error reading from MongoDB '{EMAILS_COLLECTION}' for '{u}': {e}")
+
+    pending_list = []
+    for doc in records_dict.values():
+        em = (doc.get("email") or "").lower().strip()
+        is_gmail = doc.get("is_gmail") or em.endswith("@gmail.com")
+        if is_gmail and doc.get("status", "pending") == "pending":
+            doc_copy = dict(doc)
+            doc_copy["hr_email"] = em
+            doc_copy["gmail"] = em
+            doc_copy["is_applied"] = False
+            pending_list.append(doc_copy)
+
+    pending_list.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    return pending_list[:PENDING_LIMIT]
+
+
+def get_sent_emails(username: str = "legacy") -> List[Dict[str, Any]]:
+    """
+    Returns all sent emails for the given user from `applied_emails`.
+    Contains ONLY minimal information (username + email + sent_at).
+    Capacity capped at 200.
+    """
+    u = sanitize_username(username)
+    sent_dict: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Local storage
+    for r in _load_local_json(_get_user_sent_file(u), []):
+        em = (r.get("email") or "").lower().strip()
+        if em:
+            sent_dict[em] = {
+                "username": u,
+                "email": em,
+                "sent_at": r.get("sent_at"),
+                "is_applied": True,
+                "status": "sent",
+                "is_gmail": em.endswith("@gmail.com"),
+            }
+
+    # 2. MongoDB
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            s_col = db[APPLIED_COLLECTION]
+            for doc in s_col.find({"username": u}, {"_id": 0}):
+                em = (doc.get("email") or "").lower().strip()
+                if em:
+                    sent_dict[em] = {
+                        "username": u,
+                        "email": em,
+                        "sent_at": doc.get("sent_at"),
+                        "is_applied": True,
+                        "status": "sent",
+                        "is_gmail": em.endswith("@gmail.com"),
+                    }
+        except Exception as e:
+            logger.error(f"Error reading from MongoDB '{APPLIED_COLLECTION}' for '{u}': {e}")
+
+    sent_list = list(sent_dict.values())
+    sent_list.sort(key=lambda x: str(x.get("sent_at") or ""), reverse=True)
+    return sent_list[:SENT_LIMIT]
+
+
+def get_applied_emails(username: str = "legacy") -> Set[str]:
+    """Returns set of email strings that have already been sent to by this user."""
+    sent = get_sent_emails(username=username)
+    return {s["email"].lower().strip() for s in sent if s.get("email")}
+
+
+def get_all_emails(username: str = "legacy") -> List[Dict[str, Any]]:
+    """Returns all records for this user (both pending and sent)."""
+    pending = get_pending_gmails(username=username)
+    sent = get_sent_emails(username=username)
+    return pending + sent
+
+
+def get_all_contacts(username: str = "legacy") -> List[Dict[str, Any]]:
+    """Compatibility helper: returns all contacts with is_applied boolean."""
+    return get_all_emails(username=username)
+
+
+def delete_email(email: str, username: str = "legacy") -> bool:
+    """Deletes an email record from both pending and sent collections for the user."""
+    clean = (email or "").lower().strip()
+    if not clean:
+        return False
+
+    u = sanitize_username(username)
+
+    # 1. MongoDB
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db[EMAILS_COLLECTION].delete_one({"username": u, "email": clean})
+            db[APPLIED_COLLECTION].delete_one({"username": u, "email": clean})
+        except Exception as e:
+            logger.error(f"Error deleting email from MongoDB for '{u}': {e}")
+
+    # 2. Local storage
+    p_file = _get_user_pending_file(u)
+    pending = [r for r in _load_local_json(p_file, []) if (r.get("email") or "").lower().strip() != clean]
+    _save_local_json(p_file, pending)
+
+    s_file = _get_user_sent_file(u)
+    sent = [r for r in _load_local_json(s_file, []) if (r.get("email") or "").lower().strip() != clean]
+    _save_local_json(s_file, sent)
 
     return True
 
 
-def clear_pending_emails() -> bool:
-    """Clears all pending contacts, preserving already sent records."""
+def clear_pending_emails(username: str = "legacy") -> bool:
+    """Clears all pending contacts for this user, strictly preserving sent history."""
+    u = sanitize_username(username)
+
+    # 1. MongoDB
     db = get_mongo_db()
     if db is not None:
         try:
-            db.emails.delete_many({"status": "pending"})
+            db[EMAILS_COLLECTION].delete_many({"username": u})
         except Exception as e:
-            logger.error(f"Error clearing pending emails from MongoDB: {e}")
+            logger.error(f"Error clearing pending emails from MongoDB for '{u}': {e}")
 
-    local_emails = _load_local_json(LOCAL_EMAILS_FILE, [])
-    kept = [r for r in local_emails if r.get("status") == "sent"]
-    _save_local_json(LOCAL_EMAILS_FILE, kept)
-    _save_local_json(LOCAL_CONTACTS_FILE, [])
-
+    # 2. Local storage
+    _save_local_json(_get_user_pending_file(u), [])
     return True
+
+
+def clear_user_data(username: str) -> bool:
+    """Completely resets a user's pending and sent data (both MongoDB and local storage)."""
+    u = sanitize_username(username)
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db[EMAILS_COLLECTION].delete_many({"username": u})
+            db[APPLIED_COLLECTION].delete_many({"username": u})
+        except Exception as e:
+            logger.error(f"Error resetting user data in MongoDB for '{u}': {e}")
+    _save_local_json(_get_user_pending_file(u), [])
+    _save_local_json(_get_user_sent_file(u), [])
+    return True
+
+
+def get_user_stats(username: str = "legacy") -> Dict[str, Any]:
+    """Returns storage counts and limits for the given user."""
+    u = sanitize_username(username)
+    pending = get_pending_gmails(username=u)
+    sent = get_sent_emails(username=u)
+    return {
+        "username": u,
+        "pending_count": len(pending),
+        "sent_count": len(sent),
+        "pending_limit": PENDING_LIMIT,
+        "sent_limit": SENT_LIMIT,
+        "connected": is_db_connected(),
+    }

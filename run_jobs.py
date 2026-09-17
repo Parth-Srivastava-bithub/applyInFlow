@@ -11,6 +11,7 @@ from jobs_config import (
     DEFAULT_JOBS_CSV
 )
 from jobs_scraper import LinkedInJobScraper
+from config import CDP_URL
 
 # Configure logging format
 logging.basicConfig(
@@ -64,8 +65,8 @@ def parse_arguments():
     parser.add_argument(
         "--cdp-url",
         type=str,
-        default="http://localhost:9222",
-        help="CDP endpoint (default: http://localhost:9222)"
+        default=CDP_URL,
+        help=f"CDP endpoint (default: {CDP_URL})"
     )
     return parser.parse_args()
 

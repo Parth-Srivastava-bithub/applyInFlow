@@ -14,6 +14,8 @@
       } catch(e) {}
     })();
   </script>
+  <!-- Clerk Authentication JS SDK -->
+  <script async crossorigin="anonymous" data-clerk-publishable-key="pk_test_bm9ybWFsLWV3ZS05Nzk2LmNsZXJrLmFjY291bnRzLmRldiQ" src="https://normal-ewe-9796.clerk.accounts.dev/npm/@clerk/clerk-js@latest/dist/clerk.browser.js" type="text/javascript"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1544,14 +1546,14 @@
             <span>✉</span>
             <span>Pending Emails</span>
           </div>
-          <span class="nav-badge" id="nav-badge-pending">83</span>
+          <span class="nav-badge" id="nav-badge-pending">0</span>
         </a>
         <a class="nav-item" href="#" onclick="setSidebarView('sent')">
           <div class="nav-item-left">
             <span>✈</span>
             <span>Sent Emails</span>
           </div>
-          <span class="nav-badge" id="nav-badge-sent">40</span>
+          <span class="nav-badge" id="nav-badge-sent">0</span>
         </a>
         <a class="nav-item" href="#" onclick="toast('Templates feature coming soon', 'info')">
           <div class="nav-item-left">
@@ -1570,10 +1572,10 @@
       <div class="sidebar-footer">
         <div class="sidebar-quote">“Opportunities don't just appear — you reach out.”</div>
         <div class="sidebar-user-pill" onclick="openSettings()" title="Candidate Profile & Settings">
-          <div class="user-avatar-circle" id="sidebar-user-avatar">P</div>
+          <div class="user-avatar-circle" id="sidebar-user-avatar">👤</div>
           <div class="user-info-text">
-            <div class="user-name" id="sidebar-user-name">Parth Srivastava</div>
-            <div class="user-email" id="sidebar-user-email">parthsrivastava6112004@gmail.com</div>
+            <div class="user-name" id="sidebar-user-name">Guest (Not Signed In)</div>
+            <div class="user-email" id="sidebar-user-email">Sign in with Clerk to save leads</div>
           </div>
           <span style="color: #94a3b8; font-size: 11px;">›</span>
         </div>
@@ -1596,9 +1598,18 @@
             <span class="status-dot"></span>
             <span id="db-status-text">MongoDB Connected</span>
           </div>
+          <div class="status-badge-pill" id="user-quota-badge" style="background:#eff6ff; color:#2563eb; border-color:#bfdbfe; font-size:11px;" title="User Storage Quota (Max 100 Pending, 200 Sent)">
+            <span id="quota-text">🔒 Sign In Required</span>
+          </div>
           <button class="header-icon-btn" onclick="openSettings()" title="Settings">⚙</button>
           <button class="header-icon-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode">🌙</button>
-          <div class="user-avatar-circle" onclick="openSettings()" title="Parth Srivastava" style="cursor:pointer; background:#1e293b;">P</div>
+          <div id="clerk-auth-container" style="display:flex; align-items:center; gap:8px;">
+            <div id="clerk-user-button"></div>
+            <button class="btn btn-primary-blue btn-xs" id="clerk-signin-btn" onclick="openClerkAuth()" style="display:inline-flex; align-items:center; gap:5px;">
+              <span>🔐</span> Sign In
+            </button>
+          </div>
+          <div class="user-avatar-circle" id="user-avatar-circle" onclick="openSettings()" title="User Profile" style="cursor:pointer; background:#1e293b;">👤</div>
         </div>
       </header>
 
@@ -1607,6 +1618,21 @@
 
         <!-- WORKFLOW COLUMN -->
         <div class="workflow-column">
+
+          <!-- ── CLERK AUTH WELCOME BANNER (for unauthenticated visitors) ── -->
+          <div id="clerk-auth-gate" style="display:none; background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color:#fff; border-radius:12px; padding:16px 20px; margin-bottom:16px; align-items:center; justify-content:space-between; box-shadow: 0 4px 14px rgba(37,99,235,0.25);">
+            <div>
+              <div style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                <span>🔐</span> Welcome! Sign In to Save Your Leads & Applications
+              </div>
+              <div style="font-size:12px; opacity:0.9; margin-top:3px;">
+                Sign in with your username or Gmail to store your contacts and sent emails under your personal account (100 pending & 200 sent limit).
+              </div>
+            </div>
+            <button class="btn btn-xs" onclick="openClerkAuth()" style="background:#ffffff; color:#1d4ed8; font-weight:700; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; white-space:nowrap;">
+              Sign In with Clerk →
+            </button>
+          </div>
 
           <!-- ── HERO BANNER & METRICS ── -->
           <div class="hero-banner-card">
@@ -1623,7 +1649,7 @@
               <div class="metric-card" onclick="setSidebarView('pending')">
                 <div class="metric-icon-box" style="background:#f5f3ff; color:#7c3aed;">✉</div>
                 <div class="metric-info">
-                  <span class="metric-number" id="metric-pending-count">83</span>
+                  <span class="metric-number" id="metric-pending-count">0</span>
                   <span class="metric-label">Pending Emails</span>
                 </div>
                 <span class="metric-arrow">→</span>
@@ -1633,7 +1659,7 @@
               <div class="metric-card" onclick="setSidebarView('sent')">
                 <div class="metric-icon-box" style="background:#dcfce7; color:#16a34a;">✈</div>
                 <div class="metric-info">
-                  <span class="metric-number" id="metric-sent-count">40</span>
+                  <span class="metric-number" id="metric-sent-count">0</span>
                   <span class="metric-label">Sent Emails</span>
                 </div>
                 <span class="metric-arrow">→</span>
@@ -1643,7 +1669,7 @@
               <div class="metric-card" onclick="scrollToElement('values-container')">
                 <div class="metric-icon-box" style="background:#e0f2fe; color:#0284c7;">👥</div>
                 <div class="metric-info">
-                  <span class="metric-number" id="metric-leads-count">17</span>
+                  <span class="metric-number" id="metric-leads-count">0</span>
                   <span class="metric-label">Leads Generated</span>
                 </div>
                 <span class="metric-arrow">→</span>
@@ -1653,7 +1679,7 @@
               <div class="metric-card">
                 <div class="metric-icon-box" style="background:#fef3c7; color:#d97706;">⭐</div>
                 <div class="metric-info">
-                  <span class="metric-number">8</span>
+                  <span class="metric-number">0</span>
                   <span class="metric-label">Positive Replies</span>
                 </div>
                 <span class="metric-arrow">→</span>
@@ -1825,10 +1851,10 @@
         <aside class="contacts-sidebar-col">
           <div class="sidebar-tab-toggle">
             <button class="tab-toggle-btn active" id="tab-pending" onclick="setSidebarView('pending')">
-              ✉ Pending ( <span id="count-pending">83</span> )
+              ✉ Pending ( <span id="count-pending">0</span> )
             </button>
             <button class="tab-toggle-btn" id="tab-sent" onclick="setSidebarView('sent')">
-              ✈ Sent ( <span id="count-sent">40</span> )
+              ✈ Sent ( <span id="count-sent">0</span> )
             </button>
           </div>
 
@@ -1836,7 +1862,7 @@
 
           <div class="contacts-actions-row">
             <button class="btn btn-light-gray btn-xs" onclick="copyAllEmails()">
-              📋 Copy All ( <span id="copy-count">83</span> )
+              📋 Copy All ( <span id="copy-count">0</span> )
             </button>
             <button class="btn btn-light-gray btn-xs" onclick="exportContactsCSV()">
               📥 Export CSV
@@ -1899,15 +1925,15 @@
       </div>
 
       <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin:16px 0 8px; border-bottom:1px solid var(--card-border); padding-bottom:4px;">
-        Database & AI Keys
-      </div>
-      <div style="margin-bottom:10px;">
-        <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">MongoDB Connection URI</label>
-        <input id="s-mongo-uri" class="form-input" style="width:100%; font-family:'Fira Code', monospace; font-size:11px;" placeholder="mongodb+srv://..." />
+        AI API Keys
       </div>
       <div style="margin-bottom:10px;">
         <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">Groq API Key</label>
         <input id="s-groq-key" class="form-input" style="width:100%; font-family:'Fira Code', monospace; font-size:11px;" type="password" placeholder="gsk_..." />
+      </div>
+      <div style="margin-bottom:10px;">
+        <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">OpenAI API Key (Optional)</label>
+        <input id="s-openai-key" class="form-input" style="width:100%; font-family:'Fira Code', monospace; font-size:11px;" type="password" placeholder="sk-proj-..." />
       </div>
 
       <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
@@ -2004,6 +2030,19 @@
   <div class="toast-box" id="toast-box"></div>
 
   <script>
+    let currentUsername = null;
+    let clerkInitialized = false;
+
+    // Unified API fetch helper passing the active user's identity only when authenticated
+    async function apiFetch(url, options = {}) {
+      const opts = { ...options };
+      opts.headers = { ...(opts.headers || {}) };
+      if (currentUsername) {
+        opts.headers['X-User-Name'] = currentUsername;
+      }
+      return fetch(url, opts);
+    }
+
     let searchValues = [
       "hr with mail AI ML Engineer",
       "mail your cv AI ML Engineer gmail",
@@ -2025,14 +2064,139 @@
     let searchQuery = '';
     let stopDraftingRequested = false;
 
+    function renderLockedState() {
+      document.getElementById('count-pending').textContent = '0';
+      document.getElementById('count-sent').textContent = '0';
+      document.getElementById('nav-badge-pending').textContent = '0';
+      document.getElementById('nav-badge-sent').textContent = '0';
+      document.getElementById('metric-pending-count').textContent = '0';
+      document.getElementById('metric-sent-count').textContent = '0';
+      document.getElementById('metric-leads-count').textContent = '0';
+      document.getElementById('copy-count').textContent = '0';
+      const quotaEl = document.getElementById('quota-text');
+      if (quotaEl) quotaEl.textContent = '🔒 Sign In Required';
+
+      renderContacts();
+      renderDrafts();
+    }
+
     async function init() {
       initTheme();
       initKeyboardShortcuts();
       renderSearchValues();
-      await loadProfile();
-      await checkDbStatus();
-      await loadContacts();
-      await loadDrafts();
+      renderLockedState();
+      await initClerk();
+    }
+
+    async function waitForClerk() {
+      if (window.Clerk) return window.Clerk;
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (window.Clerk) return window.Clerk;
+      }
+      return null;
+    }
+
+    async function initClerk() {
+      const signinBtn = document.getElementById('clerk-signin-btn');
+      const userSlot = document.getElementById('clerk-user-button');
+      const avatarFallback = document.getElementById('user-avatar-circle');
+      const authGate = document.getElementById('clerk-auth-gate');
+
+      try {
+        const clerk = await waitForClerk();
+        if (clerk) {
+          if (!clerk.loaded) {
+            await clerk.load();
+          }
+          clerkInitialized = true;
+
+          async function syncUserState(user) {
+            if (user) {
+              const rawUser = user.username || (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || 'user';
+              currentUsername = rawUser;
+              localStorage.setItem('autoapply_user', currentUsername);
+
+              if (signinBtn) signinBtn.style.display = 'none';
+              if (authGate) authGate.style.display = 'none';
+              if (avatarFallback) avatarFallback.style.display = 'none';
+
+              if (userSlot) {
+                userSlot.style.display = 'inline-block';
+                clerk.mountUserButton(userSlot, {
+                  afterSignOutUrl: window.location.href,
+                });
+              }
+
+              // Sidebar display
+              const displayName = user.fullName || user.firstName || currentUsername;
+              const sidebarNameEl = document.getElementById('sidebar-user-name');
+              if (sidebarNameEl) sidebarNameEl.textContent = displayName;
+              const sidebarEmailEl = document.getElementById('sidebar-user-email');
+              if (sidebarEmailEl && user.primaryEmailAddress) {
+                sidebarEmailEl.textContent = user.primaryEmailAddress.emailAddress;
+              }
+              const avatarEl = document.getElementById('sidebar-user-avatar');
+              if (avatarEl) avatarEl.textContent = (displayName[0] || 'U').toUpperCase();
+
+              await loadProfile();
+              await checkDbStatus();
+              await loadContacts();
+              await loadDrafts();
+            } else {
+              // Signed out: strictly wipe state and lock all private views
+              currentUsername = null;
+              localStorage.removeItem('autoapply_user');
+              contacts = [];
+              sentEmails = [];
+              drafts = [];
+              profile = {};
+
+              if (signinBtn) signinBtn.style.display = 'inline-flex';
+              if (authGate) authGate.style.display = 'flex';
+              if (userSlot) userSlot.style.display = 'none';
+              if (avatarFallback) avatarFallback.style.display = 'inline-flex';
+
+              const sidebarNameEl = document.getElementById('sidebar-user-name');
+              if (sidebarNameEl) sidebarNameEl.textContent = 'Guest (Not Signed In)';
+              const sidebarEmailEl = document.getElementById('sidebar-user-email');
+              if (sidebarEmailEl) sidebarEmailEl.textContent = 'Sign in with Clerk to save leads';
+              const avatarEl = document.getElementById('sidebar-user-avatar');
+              if (avatarEl) avatarEl.textContent = '👤';
+
+              renderLockedState();
+            }
+          }
+
+          clerk.addListener(async ({ user }) => {
+            await syncUserState(user);
+          });
+
+          await syncUserState(clerk.user);
+        } else {
+          console.warn('Clerk SDK was not reachable or blocked by network.');
+          if (signinBtn) signinBtn.style.display = 'inline-flex';
+          if (authGate) authGate.style.display = 'flex';
+          renderLockedState();
+        }
+      } catch (err) {
+        console.warn('Clerk initialization error:', err);
+        if (signinBtn) signinBtn.style.display = 'inline-flex';
+        if (authGate) authGate.style.display = 'flex';
+        renderLockedState();
+      }
+    }
+
+    function openClerkAuth() {
+      if (window.Clerk) {
+        try {
+          window.Clerk.openSignIn();
+        } catch (e) {
+          console.error(e);
+        }
+      } else {
+        toast('Clerk auth is still initializing, please wait a moment...', 'info');
+      }
     }
 
     function initKeyboardShortcuts() {
@@ -2071,14 +2235,25 @@
     }
 
     async function checkDbStatus() {
+      if (!currentUsername) {
+        const quotaEl = document.getElementById('quota-text');
+        if (quotaEl) quotaEl.textContent = '🔒 Sign In Required';
+        return;
+      }
       try {
-        const res = await fetch('/api/db-status');
+        const res = await apiFetch('/api/db-status');
         const data = await res.json();
         const pendingN = data.pending_count ?? data.pending_gmail_count ?? 0;
         const sentN = data.sent_count ?? data.applied_count ?? 0;
         const badgeText = document.getElementById('db-status-text');
         if (badgeText) {
           badgeText.textContent = data.connected ? 'MongoDB Connected' : 'Local Storage';
+        }
+        const quotaEl = document.getElementById('quota-text');
+        if (quotaEl) {
+          const pLimit = data.pending_limit ?? 100;
+          const sLimit = data.sent_limit ?? 200;
+          quotaEl.textContent = `Pending: ${pendingN}/${pLimit} • Sent: ${sentN}/${sLimit}`;
         }
         document.getElementById('metric-pending-count').textContent = pendingN;
         document.getElementById('metric-sent-count').textContent = sentN;
@@ -2102,13 +2277,18 @@
     function removeValue(idx) { searchValues.splice(idx, 1); renderSearchValues(); }
 
     async function generateAiQueries() {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk first to generate queries', 'warning');
+        openClerkAuth();
+        return;
+      }
       const topic = document.getElementById('target-topic').value.trim() || 'AI ML Engineer';
       const btn = document.getElementById('btn-gen-queries');
       btn.disabled = true;
       btn.textContent = 'Generating...';
 
       try {
-        const res = await fetch('/api/suggest-queries', {
+        const res = await apiFetch('/api/suggest-queries', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ topic })
@@ -2128,6 +2308,11 @@
     }
 
     async function startScrapeWithValues() {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk first to run scraper and store contacts', 'warning');
+        openClerkAuth();
+        return;
+      }
       const btn = document.getElementById('btn-scrape-all');
       const btnStop = document.getElementById('btn-stop-scrape');
       const progBox = document.getElementById('scrape-progress-box');
@@ -2149,7 +2334,7 @@
 
       const pollTimer = setInterval(async () => {
         try {
-          const res = await fetch('/api/scrape-status');
+          const res = await apiFetch('/api/scrape-status');
           const st = await res.json();
           if (st.is_running) {
             progBar.style.width = `${st.percent}%`;
@@ -2162,7 +2347,7 @@
       }, 1000);
 
       try {
-        const res = await fetch('/api/scrape', {
+        const res = await apiFetch('/api/scrape', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ queries: searchValues, max_posts: 15 })
@@ -2190,14 +2375,18 @@
 
     async function stopScraping() {
       try {
-        await fetch('/api/scrape/stop', { method: 'POST' });
+        await apiFetch('/api/scrape/stop', { method: 'POST' });
         toast('Stop requested. Finishing current query...', 'info');
       } catch (e) {}
     }
 
     async function loadProfile() {
+      if (!currentUsername) {
+        profile = {};
+        return;
+      }
       try {
-        const res = await fetch('/api/profile');
+        const res = await apiFetch('/api/profile');
         profile = await res.json();
         if (profile.resume_filename) {
           document.getElementById('resume-filename').textContent = profile.resume_filename;
@@ -2213,10 +2402,16 @@
     }
 
     async function loadContacts() {
+      if (!currentUsername) {
+        contacts = [];
+        sentEmails = [];
+        renderLockedState();
+        return;
+      }
       try {
         const [resPending, resSent] = await Promise.all([
-          fetch('/api/contacts?filter=pending_gmail'),
-          fetch('/api/contacts?filter=sent')
+          apiFetch('/api/contacts?filter=pending_gmail'),
+          apiFetch('/api/contacts?filter=sent')
         ]);
         contacts = await resPending.json();
         sentEmails = await resSent.json();
@@ -2262,6 +2457,22 @@
 
     function renderContacts() {
       const listContainer = document.getElementById('contacts-list');
+      if (!currentUsername) {
+        document.getElementById('copy-count').textContent = '0';
+        listContainer.innerHTML = `
+          <div style="text-align:center; padding:50px 20px;">
+            <div style="font-size:36px; margin-bottom:12px;">🔒</div>
+            <div style="font-weight:700; font-size:14px; color:var(--text-main); margin-bottom:6px;">Contacts Locked</div>
+            <div style="font-size:12px; color:var(--text-muted); line-height:1.5; margin-bottom:16px;">
+              Recruiter emails and outreach pipelines are private to your personal account. Sign in to view and manage your contacts.
+            </div>
+            <button class="btn btn-primary-blue btn-xs" onclick="openClerkAuth()" style="margin:0 auto; display:inline-flex; align-items:center; gap:6px;">
+              <span>🔐</span> Sign In with Clerk
+            </button>
+          </div>
+        `;
+        return;
+      }
       const visible = getFilteredContacts();
       document.getElementById('copy-count').textContent = visible.length;
 
@@ -2330,6 +2541,11 @@
     }
 
     function copyAllEmails() {
+      if (!currentUsername) {
+        toast('No contacts to copy — please sign in first', 'info');
+        openClerkAuth();
+        return;
+      }
       const visible = getFilteredContacts();
       const emails = visible.map(c => c.email || c.hr_email || c.gmail).filter(Boolean);
       if (!emails.length) return;
@@ -2338,6 +2554,11 @@
     }
 
     function exportContactsCSV() {
+      if (!currentUsername) {
+        toast('No contacts to export — please sign in first', 'info');
+        openClerkAuth();
+        return;
+      }
       const visible = getFilteredContacts();
       if (!visible.length) return;
       const rows = visible.map(c => [`"${c.name || ''}"`, `"${c.email || c.hr_email || ''}"`, `"${c.title || ''}"`]);
@@ -2351,7 +2572,12 @@
     }
 
     async function deleteSingleContact(email) {
-      await fetch('/api/contacts/delete', {
+      if (!currentUsername) {
+        toast('Please sign in first', 'warning');
+        openClerkAuth();
+        return;
+      }
+      await apiFetch('/api/contacts/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
@@ -2361,20 +2587,30 @@
     }
 
     async function clearAllContactsPrompt() {
+      if (!currentUsername) {
+        toast('Please sign in first', 'warning');
+        openClerkAuth();
+        return;
+      }
       if (!confirm('Clear all pending contacts?')) return;
-      await fetch('/api/contacts/clear', { method: 'POST' });
+      await apiFetch('/api/contacts/clear', { method: 'POST' });
       toast('Cleared pending contacts', 'info');
       await loadContacts();
     }
 
     async function draftForContact(email, btn) {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk first to draft emails', 'warning');
+        openClerkAuth();
+        return;
+      }
       let c = contacts.find(x => (x.email || x.hr_email || x.gmail) === email);
       if (!c) return;
       if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Drafting...'; }
       toast(`Drafting email for ${c.name || email}...`, 'info');
 
       try {
-        const res = await fetch('/api/generate', {
+        const res = await apiFetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2387,7 +2623,7 @@
         });
         const data = await res.json();
         if (data.body) {
-          await fetch('/api/save-email', {
+          await apiFetch('/api/save-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2410,8 +2646,13 @@
     }
 
     async function loadDrafts() {
+      if (!currentUsername) {
+        drafts = [];
+        renderDrafts();
+        return;
+      }
       try {
-        const res = await fetch('/api/emails');
+        const res = await apiFetch('/api/emails');
         const all = await res.json();
         const sentSet = new Set(sentEmails.map(s => (s.email || '').toLowerCase().trim()));
         drafts = (all || []).filter(d => d.status !== 'sent' && !sentSet.has((d.to_email || '').toLowerCase().trim()));
@@ -2421,6 +2662,24 @@
 
     function renderDrafts() {
       const container = document.getElementById('drafts-container');
+      if (!currentUsername) {
+        document.getElementById('tailor-all-count').textContent = '0';
+        document.getElementById('clear-drafts-count').textContent = '0';
+        document.getElementById('apply-all-count').textContent = '0';
+        container.innerHTML = `
+          <div style="text-align:center; padding:60px 20px; border:2px dashed var(--card-border); border-radius:12px; margin-top:16px;">
+            <div style="font-size:36px; margin-bottom:12px;">🔒</div>
+            <div style="font-weight:700; font-size:15px; color:var(--text-main); margin-bottom:6px;">Cold Email Drafts are Private</div>
+            <div style="font-size:12.5px; color:var(--text-muted); max-width:400px; margin:0 auto 16px; line-height:1.5;">
+              Your generated drafts, tailored resumes, and outreach history are protected under your personal account.
+            </div>
+            <button class="btn btn-primary-blue btn-sm" onclick="openClerkAuth()" style="display:inline-flex; align-items:center; gap:6px;">
+              <span>🔐</span> Sign In to View Drafts
+            </button>
+          </div>
+        `;
+        return;
+      }
       document.getElementById('tailor-all-count').textContent = drafts.length;
       document.getElementById('clear-drafts-count').textContent = drafts.length;
       document.getElementById('apply-all-count').textContent = drafts.length;
@@ -2522,7 +2781,7 @@
       toast(`⚡ Surgically injecting missing skills into resume...`, 'info');
 
       try {
-        const res = await fetch('/api/resume/quick-tailor-skills', {
+        const res = await apiFetch('/api/resume/quick-tailor-skills', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2537,7 +2796,7 @@
           d.tailored_resume_filename = data.filename;
           d.tailored_tex = data.tex;
           if (data.fit) d.fit = data.fit;
-          await fetch('/api/save-email', {
+          await apiFetch('/api/save-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(d)
@@ -2589,7 +2848,7 @@
       const masterUrl = `/api/resume/pdf/resume_master.pdf?t=${Date.now()}`;
       if (iframe) iframe.src = masterUrl;
       document.getElementById('tailor-pdf-link').href = masterUrl;
-      fetch('/api/resume/base-tex').then(r => r.json()).then(data => {
+      apiFetch('/api/resume/base-tex').then(r => r.json()).then(data => {
         if (data.tex) {
           currentTailoredTex = data.tex;
           document.getElementById('tailor-raw-tex').value = data.tex;
@@ -2621,7 +2880,7 @@
       if (spinner) spinner.style.display = 'flex';
 
       try {
-        const res = await fetch('/api/resume/quick-tailor-skills', {
+        const res = await apiFetch('/api/resume/quick-tailor-skills', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2644,7 +2903,7 @@
           document.getElementById('tailor-raw-tex').value = data.tex;
 
           populateModalMissingChips(d);
-          await fetch('/api/save-email', {
+          await apiFetch('/api/save-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(d)
@@ -2680,7 +2939,7 @@
       if (spinner) spinner.style.display = 'flex';
 
       try {
-        const res = await fetch('/api/resume/tailor', {
+        const res = await apiFetch('/api/resume/tailor', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2712,7 +2971,7 @@
       const d = drafts[activeTailorDraftIdx];
       d.tailored_resume_filename = currentTailoredFilename;
       d.tailored_tex = currentTailoredTex;
-      await fetch('/api/save-email', {
+      await apiFetch('/api/save-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(d)
@@ -2730,7 +2989,7 @@
       if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '⏳ Sending...'; }
 
       try {
-        const res = await fetch('/api/send', {
+        const res = await apiFetch('/api/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2754,6 +3013,11 @@
     }
 
     async function generateBatchDrafts() {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk first to generate drafts', 'warning');
+        openClerkAuth();
+        return;
+      }
       const unapplied = contacts.filter(c => !c.is_applied && c.status !== 'sent');
       if (!unapplied.length) { toast('All contacts applied to!', 'info'); return; }
 
@@ -2770,7 +3034,7 @@
         const c = target[i];
         btn.textContent = `⚡ Drafting ${i + 1}/${target.length}...`;
         try {
-          const res = await fetch('/api/generate', {
+          const res = await apiFetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2783,7 +3047,7 @@
           });
           const data = await res.json();
           if (data.body) {
-            await fetch('/api/save-email', {
+            await apiFetch('/api/save-email', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -2805,6 +3069,11 @@
     }
 
     async function applyToAll() {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk first', 'warning');
+        openClerkAuth();
+        return;
+      }
       if (!drafts.length || !confirm(`Send all ${drafts.length} applications now?`)) return;
       for (let i = 0; i < drafts.length; i++) {
         await sendSingleDraft(i);
@@ -2814,6 +3083,11 @@
     }
 
     async function tailorAllDraftResumes() {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk first', 'warning');
+        openClerkAuth();
+        return;
+      }
       if (!drafts.length) return;
       toast('Auto-tailoring all drafts via XeLaTeX...', 'info');
       for (let i = 0; i < drafts.length; i++) {
@@ -2836,14 +3110,19 @@
     }
 
     function openSettings() {
+      if (!currentUsername) {
+        toast('Please sign in with Clerk to access settings', 'info');
+        openClerkAuth();
+        return;
+      }
       document.getElementById('s-name').value = profile.name || '';
       document.getElementById('s-role').value = profile.role || '';
       document.getElementById('s-skills').value = profile.skills || '';
       document.getElementById('s-exp').value = profile.experience || '';
       document.getElementById('s-gmail').value = profile.gmail_sender || '';
       document.getElementById('s-pwd').value = profile.gmail_app_password || '';
-      document.getElementById('s-mongo-uri').value = profile.mongodb_uri || '';
       document.getElementById('s-groq-key').value = profile.groq_api_key || '';
+      document.getElementById('s-openai-key').value = profile.openai_api_key || '';
       document.getElementById('settings-modal').classList.add('open');
     }
 
@@ -2857,10 +3136,10 @@
         experience: document.getElementById('s-exp').value.trim(),
         gmail_sender: document.getElementById('s-gmail').value.trim(),
         gmail_app_password: document.getElementById('s-pwd').value.trim(),
-        mongodb_uri: document.getElementById('s-mongo-uri').value.trim(),
         groq_api_key: document.getElementById('s-groq-key').value.trim(),
+        openai_api_key: document.getElementById('s-openai-key').value.trim(),
       };
-      await fetch('/api/profile', {
+      await apiFetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -2868,14 +3147,14 @@
       closeSettings();
       await loadProfile();
       await checkDbStatus();
-      toast('Settings saved successfully!', 'success');
+      toast('Settings saved successfully for ' + currentUsername + '!', 'success');
     }
 
     async function uploadResume(input) {
       if (!input.files || !input.files[0]) return;
       const formData = new FormData();
       formData.append('resume', input.files[0]);
-      const res = await fetch('/api/upload-resume', { method: 'POST', body: formData });
+      const res = await apiFetch('/api/upload-resume', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.ok) {
         toast('Resume uploaded!', 'success');

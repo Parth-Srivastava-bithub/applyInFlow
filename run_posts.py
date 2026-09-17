@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 from posts_scraper import main, DEFAULT_QUERIES
+from config import CDP_URL
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +29,7 @@ def parse_args():
         help="Max posts with emails to collect per query (default: 30)"
     )
     parser.add_argument(
-        "--cdp-url", default="http://localhost:9222",
+        "--cdp-url", default=CDP_URL,
         help="Chrome CDP endpoint"
     )
     return parser.parse_args()

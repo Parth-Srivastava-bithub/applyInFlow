@@ -1,0 +1,19 @@
+You are an expert recruiter parser. Extract structured job requirements from the following LinkedIn post snippet.
+
+CRITICAL RULES:
+1. ONLY extract requirements that are EXPLICITLY stated or strongly implied in the text.
+2. If experience years are NOT mentioned, return min_experience_years: null.
+3. If work mode (remote/hybrid/onsite) is NOT mentioned, return work_mode: null.
+4. Extract only key technical skills mentioned (e.g. Python, PyTorch, React, Docker).
+5. Output ONLY valid JSON matching this schema:
+{
+  "min_experience_years": float or null,
+  "max_experience_years": float or null,
+  "required_skills": ["skill1", "skill2"],
+  "role_domain": "string or null",
+  "work_mode": "remote" or "hybrid" or "onsite" or null,
+  "urgency": "immediate" or "15 days" or null
+}
+
+LinkedIn Post Snippet:
+"""$post_text"""

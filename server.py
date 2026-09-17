@@ -20,6 +20,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 import threading
+from typing import Optional, List, Dict, Any, Set
 
 import requests
 from dotenv import load_dotenv
@@ -42,6 +43,7 @@ from resume_parser import (
     format_candidate_context_for_prompt,
     structure_resume_with_ai,
 )
+from pipeline.name_cleaner import clean_name
 
 load_dotenv()
 import db
@@ -105,7 +107,70 @@ def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def load_profile() -> dict:
+def check_and_migrate_legacy_for_owner(u: str):
+    """
+    If the authenticated user matches the owner/creator (Parth),
+    automatically adopt existing legacy documents in MongoDB into their username.
+    """
+    if u in ("parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com"):
+        mdb = db.get_mongo_db()
+        if mdb is not None:
+            try:
+                legacy_count = mdb[db.EMAILS_COLLECTION].count_documents({"username": "legacy"})
+                if legacy_count > 0:
+                    mdb[db.EMAILS_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
+                    mdb[db.APPLIED_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
+            except Exception:
+                pass
+
+
+def get_current_username() -> Optional[str]:
+    """
+    Extracts active username from X-User-Name header, query parameters, or body.
+    Returns None if unauthenticated to prevent data leakage.
+    Strictly forbids 'legacy', 'guest', 'anonymous', 'null', 'undefined', 'none'
+    to prevent unauthenticated visitors from accessing pre-migration legacy data.
+    """
+    forbidden = ("null", "undefined", "anonymous", "guest", "none", "legacy", "")
+    header_u = request.headers.get("X-User-Name")
+    if header_u and header_u.strip() and header_u.strip().lower() not in forbidden:
+        u = db.sanitize_username(header_u)
+        check_and_migrate_legacy_for_owner(u)
+        return u
+    param_u = request.args.get("username")
+    if param_u and param_u.strip() and param_u.strip().lower() not in forbidden:
+        u = db.sanitize_username(param_u)
+        check_and_migrate_legacy_for_owner(u)
+        return u
+    if request.is_json:
+        try:
+            body_u = (request.json or {}).get("username")
+            if body_u and str(body_u).strip() and str(body_u).strip().lower() not in forbidden:
+                u = db.sanitize_username(body_u)
+                check_and_migrate_legacy_for_owner(u)
+                return u
+        except Exception:
+            pass
+    return None
+
+
+def get_user_profile_file(username: Optional[str] = "legacy") -> Path:
+    u = db.sanitize_username(username or "legacy")
+    if u == "legacy":
+        return PROFILE_FILE
+    user_dir = db._get_user_dir(u)
+    return user_dir / "profile.json"
+
+
+def get_user_drafts_file(username: Optional[str] = "legacy") -> Path:
+    u = db.sanitize_username(username or "legacy")
+    if u == "legacy":
+        return EMAILS_FILE
+    user_dir = db._get_user_dir(u)
+    return user_dir / "cold_emails.json"
+
+
+def load_profile(username: Optional[str] = None) -> dict:
     default = {
         "name": "",
         "role": "AI/ML Engineer",
@@ -117,26 +182,45 @@ def load_profile() -> dict:
         "gmail_sender": "",
         "gmail_app_password": "",
         "resume_filename": "",
-        "mongodb_uri": "",
         "groq_api_key": "",
         "openai_api_key": "",
     }
-    saved = load_json(PROFILE_FILE, {})
+    if not username:
+        return default
+
+    u = db.sanitize_username(username)
+    p_file = get_user_profile_file(u)
+    saved = load_json(p_file, {})
+    is_owner = u in ("legacy", "parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com")
+    if not saved and is_owner:
+        saved = load_json(PROFILE_FILE, {})
+
     res = {**default, **saved}
-    if not res.get("gmail_sender"):
-        res["gmail_sender"] = os.getenv("GMAIL_SENDER") or os.getenv("SENDER_EMAIL", "")
+    if is_owner:
         if not res.get("gmail_sender"):
-            resume_data = load_json(STRUCTURED_RESUME_FILE, {})
-            res["gmail_sender"] = resume_data.get("email", "")
-    if not res.get("gmail_app_password"):
-        res["gmail_app_password"] = os.getenv("GMAIL_APP_PASSWORD", "")
-    if not res.get("mongodb_uri"):
-        res["mongodb_uri"] = os.getenv("MONGODB_URI", "")
-    if not res.get("groq_api_key"):
-        res["groq_api_key"] = os.getenv("GROQ_API_KEY", "")
-    if not res.get("openai_api_key"):
-        res["openai_api_key"] = os.getenv("OPENAI_API_KEY", "")
+            res["gmail_sender"] = os.getenv("GMAIL_SENDER") or os.getenv("SENDER_EMAIL", "")
+            if not res.get("gmail_sender"):
+                resume_data = load_json(STRUCTURED_RESUME_FILE, {})
+                res["gmail_sender"] = resume_data.get("email", "")
+        if not res.get("gmail_app_password"):
+            res["gmail_app_password"] = os.getenv("GMAIL_APP_PASSWORD", "")
+        if not res.get("groq_api_key"):
+            res["groq_api_key"] = os.getenv("GROQ_API_KEY", "")
+        if not res.get("openai_api_key"):
+            res["openai_api_key"] = os.getenv("OPENAI_API_KEY", "")
     return res
+
+
+def save_user_profile(data: dict, username: str = "legacy") -> dict:
+    u = db.sanitize_username(username)
+    p_file = get_user_profile_file(u)
+    profile = load_profile(u)
+    profile.update(data)
+    save_json(p_file, profile)
+    is_owner = u in ("legacy", "parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com")
+    if is_owner:
+        save_json(PROFILE_FILE, profile)
+    return profile
 
 
 def sync_env_file(updates: dict):
@@ -370,13 +454,16 @@ def resolve_contact_name(stored_name: str, email: str) -> str:
             return derived
     return stored
 
-def groq_stream(messages: list, model: str = None, max_tokens: int = 4096) -> str:
+def groq_stream(messages: list, model: str = None, max_tokens: int = 4096, user_profile: dict = None) -> str:
     use_model = model or MODEL
     is_openai = use_model.startswith("gpt-") or use_model.startswith("o1") or use_model.startswith("o3") or use_model.startswith("chatgpt")
 
-    # OpenAI key is completely non-mandatory. Fall back to Groq if key is missing or not wanted.
+    prof = user_profile or {}
+    user_openai_key = (prof.get("openai_api_key") or os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
+    user_groq_key = (prof.get("groq_api_key") or os.getenv("GROQ_API_KEY") or GROQ_API_KEY or "").strip()
+
     if is_openai:
-        api_key = (os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
+        api_key = user_openai_key
         if not api_key:
             is_openai = False
             use_model = MODEL or "qwen/qwen3.8-27b"
@@ -391,7 +478,7 @@ def groq_stream(messages: list, model: str = None, max_tokens: int = 4096) -> st
             "stream": True,
         }
     else:
-        api_key = os.getenv("GROQ_API_KEY", "") or GROQ_API_KEY
+        api_key = user_groq_key
         url = GROQ_URL
         payload = {
             "model": use_model,
@@ -439,40 +526,54 @@ def index():
 
 @app.route("/api/profile", methods=["GET"])
 def get_profile():
-    return jsonify(load_profile())
+    u = get_current_username()
+    if not u:
+        return jsonify({
+            "name": "",
+            "role": "",
+            "skills": "",
+            "experience": "",
+            "location": "",
+            "linkedin": "",
+            "phone": "",
+            "gmail_sender": "",
+            "gmail_app_password": "",
+            "resume_filename": "",
+            "groq_api_key": "",
+            "openai_api_key": "",
+            "authenticated": False
+        })
+    prof = load_profile(username=u)
+    prof["authenticated"] = True
+    return jsonify(prof)
 
 
 @app.route("/api/profile", methods=["POST"])
 def save_profile_route():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required to update settings"}), 401
     data = request.json or {}
-    profile = load_profile()
-    profile.update(data)
-    save_json(PROFILE_FILE, profile)
+    profile = save_user_profile(data, username=u)
 
     env_updates = {}
-    if "mongodb_uri" in data:
-        mongo_val = (data["mongodb_uri"] or "").strip()
-        os.environ["MONGODB_URI"] = mongo_val
-        env_updates["MONGODB_URI"] = mongo_val
-        db.reset_mongo_connection()
-
-    if "groq_api_key" in data:
+    if "groq_api_key" in data and u == "legacy":
         groq_val = (data["groq_api_key"] or "").strip()
         os.environ["GROQ_API_KEY"] = groq_val
         global GROQ_API_KEY
         GROQ_API_KEY = groq_val
         env_updates["GROQ_API_KEY"] = groq_val
 
-    if "openai_api_key" in data:
+    if "openai_api_key" in data and u == "legacy":
         openai_val = (data["openai_api_key"] or "").strip()
         os.environ["OPENAI_API_KEY"] = openai_val
         global OPENAI_API_KEY
         OPENAI_API_KEY = openai_val
         env_updates["OPENAI_API_KEY"] = openai_val
 
-    if "gmail_sender" in data:
+    if "gmail_sender" in data and u == "legacy":
         env_updates["GMAIL_SENDER"] = (data["gmail_sender"] or "").strip()
-    if "gmail_app_password" in data:
+    if "gmail_app_password" in data and u == "legacy":
         env_updates["GMAIL_APP_PASSWORD"] = (data["gmail_app_password"] or "").strip()
 
     if env_updates:
@@ -483,23 +584,27 @@ def save_profile_route():
 
     return jsonify({
         "ok": True,
-        "mongo_connected": db.is_db_connected()
+        "mongo_connected": db.is_db_connected(),
+        "username": u
     })
 
 
 @app.route("/api/contacts", methods=["GET"])
 def get_contacts():
+    u = get_current_username()
+    if not u:
+        return jsonify([])
     filt = request.args.get("filter", "pending_gmail").lower().strip()
     if filt == "all":
-        records = db.get_all_contacts()
+        records = db.get_all_contacts(username=u)
     elif filt == "sent":
-        records = db.get_sent_emails()
+        records = db.get_sent_emails(username=u)
     else:
-        records = db.get_pending_gmails()
+        records = db.get_pending_gmails(username=u)
 
     for r in records:
         e = (r.get("email") or r.get("hr_email") or r.get("gmail") or "").lower().strip()
-        resolved = resolve_contact_name(r.get("name"), e)
+        resolved = resolve_contact_name(clean_name(r.get("name")), e)
         r["name"] = resolved
         r["resolved_name"] = resolved
         r["is_applied"] = (r.get("status") == "sent")
@@ -511,39 +616,66 @@ def get_contacts():
 
 @app.route("/api/applied-emails", methods=["GET"])
 def get_applied_emails():
-    return jsonify(list(db.get_applied_emails()))
+    u = get_current_username()
+    if not u:
+        return jsonify([])
+    return jsonify(list(db.get_applied_emails(username=u)))
 
 
 @app.route("/api/db-status", methods=["GET"])
 def get_db_status():
-    all_emails = db.get_all_emails()
-    pending_gmails = db.get_pending_gmails()
-    sent_emails = db.get_sent_emails()
-    applied = db.get_applied_emails()
+    u = get_current_username()
+    if not u:
+        return jsonify({
+            "connected": db.is_db_connected(),
+            "authenticated": False,
+            "username": "",
+            "total_contacts": 0,
+            "pending_gmail_count": 0,
+            "pending_count": 0,
+            "sent_count": 0,
+            "applied_count": 0,
+            "unapplied_count": 0,
+            "pending_limit": db.PENDING_LIMIT,
+            "sent_limit": db.SENT_LIMIT
+        })
+    stats = db.get_user_stats(username=u)
+    pending_count = stats["pending_count"]
+    sent_count = stats["sent_count"]
     return jsonify({
-        "connected": db.is_db_connected(),
-        "total_contacts": len(all_emails),
-        "pending_gmail_count": len(pending_gmails),
-        "pending_count": len(pending_gmails),
-        "sent_count": len(sent_emails),
-        "applied_count": max(len(sent_emails), len(applied)),
-        "unapplied_count": len(pending_gmails)
+        "connected": stats["connected"],
+        "authenticated": True,
+        "username": stats["username"],
+        "total_contacts": pending_count + sent_count,
+        "pending_gmail_count": pending_count,
+        "pending_count": pending_count,
+        "sent_count": sent_count,
+        "applied_count": sent_count,
+        "unapplied_count": pending_count,
+        "pending_limit": stats["pending_limit"],
+        "sent_limit": stats["sent_limit"]
     })
 
 
 @app.route("/api/contacts/delete", methods=["POST"])
 def delete_contact():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     target_email = (data.get("email") or "").lower().strip()
     if not target_email:
         return jsonify({"error": "No email provided"}), 400
-    db.delete_email(target_email)
+    db.delete_email(target_email, username=u)
     return jsonify({"ok": True})
 
 
 @app.route("/api/contacts/clear", methods=["POST"])
 def clear_contacts():
-    db.clear_pending_emails()
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
+    db.clear_pending_emails(username=u)
     return jsonify({"ok": True})
 
 
@@ -551,10 +683,14 @@ def clear_contacts():
 def get_emails():
     """
     Returns strictly pending, unsent drafts.
-    Cross-verifies every email against actual DB records (MongoDB Atlas and sent logs).
+    Cross-verifies every email against actual DB records for this user.
     Any email that has already been sent is permanently excluded from this window.
     """
-    drafts = load_json(EMAILS_FILE, [])
+    u = get_current_username()
+    if not u:
+        return jsonify([])
+    drafts_file = get_user_drafts_file(u)
+    drafts = load_json(drafts_file, [])
     pending_drafts = []
     has_changes = False
 
@@ -563,7 +699,7 @@ def get_emails():
         if not em:
             continue
         # Verify with actual database & sent logs: sent emails must NEVER appear in drafts window
-        if d.get("status") == "sent" or db.is_email_applied(em):
+        if d.get("status") == "sent" or db.is_email_applied(em, username=u):
             if d.get("status") != "sent":
                 d["status"] = "sent"
                 has_changes = True
@@ -572,7 +708,7 @@ def get_emails():
         pending_drafts.append(d)
 
     if has_changes:
-        save_json(EMAILS_FILE, drafts)
+        save_json(drafts_file, drafts)
 
     sort_mode = request.args.get("sort", "score").lower().strip()
     if sort_mode == "date":
@@ -593,24 +729,32 @@ def get_emails():
 
 @app.route("/api/emails/delete", methods=["POST"])
 def delete_draft():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     to_email = (data.get("to_email") or "").lower().strip()
     if not to_email:
         return jsonify({"error": "No email provided"}), 400
-    emails = load_json(EMAILS_FILE, [])
+    drafts_file = get_user_drafts_file(u)
+    emails = load_json(drafts_file, [])
     emails = [e for e in emails if (e.get("to_email") or "").lower().strip() != to_email]
-    save_json(EMAILS_FILE, emails)
+    save_json(drafts_file, emails)
     return jsonify({"ok": True})
 
 
 @app.route("/api/emails/clear", methods=["POST"])
 def clear_all_drafts():
     """
-    Clears all unsent drafts from cold_emails.json while strictly preserving sent email history.
+    Clears all unsent drafts while strictly preserving sent email history.
     """
-    emails = load_json(EMAILS_FILE, [])
-    kept = [e for e in emails if e.get("status") == "sent" or db.is_email_applied(e.get("to_email", ""))]
-    save_json(EMAILS_FILE, kept)
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
+    drafts_file = get_user_drafts_file(u)
+    emails = load_json(drafts_file, [])
+    kept = [e for e in emails if e.get("status") == "sent" or db.is_email_applied(e.get("to_email", ""), username=u)]
+    save_json(drafts_file, kept)
     return jsonify({"ok": True})
 
 
@@ -621,8 +765,12 @@ def get_scrape_status():
 
 @app.route("/api/suggest-queries", methods=["POST"])
 def suggest_queries():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     topic = data.get("topic", "AI ML Engineer").strip()
+    profile = load_profile(u)
 
     prompt = f"""You are a recruiter outreach & LinkedIn search expert.
 Target role: "{topic}"
@@ -643,7 +791,7 @@ Example: {{"queries": ["query 1", "query 2", ...]}}"""
         "max_completion_tokens": 1024,
         "response_format": {"type": "json_object"}
     }
-    groq_key = os.getenv("GROQ_API_KEY", "") or GROQ_API_KEY
+    groq_key = (profile.get("groq_api_key") or os.getenv("GROQ_API_KEY", "") or GROQ_API_KEY).strip()
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {groq_key}",
@@ -679,6 +827,9 @@ Example: {{"queries": ["query 1", "query 2", ...]}}"""
 @app.route("/api/scrape", methods=["POST"])
 def trigger_scrape():
     global SCRAPE_PROGRESS
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     queries = data.get("queries", [])
     if isinstance(queries, str):
@@ -714,11 +865,11 @@ def trigger_scrape():
 
             existing_before = {
                 (e.get("email") or e.get("hr_email") or e.get("gmail") or "").lower().strip()
-                for e in db.get_all_emails()
+                for e in db.get_all_emails(username=u)
                 if (e.get("email") or e.get("hr_email") or e.get("gmail"))
             }
             # Strictly include all sent and applied email history across MongoDB and local logs
-            for app_em in db.get_applied_emails():
+            for app_em in db.get_applied_emails(username=u):
                 clean_app = (app_em or "").lower().strip()
                 if clean_app:
                     existing_before.add(clean_app)
@@ -744,7 +895,7 @@ def trigger_scrape():
                         queries=[query],
                         max_posts_per_query=max_posts,
                     )
-                    all_saved = db.save_contacts(results)
+                    all_saved = db.save_contacts(results, username=u)
 
                     # Track newly discovered contacts in this query
                     for item in results:
@@ -771,7 +922,7 @@ def trigger_scrape():
 
                 if not SCRAPE_PROGRESS.get("stop_requested"):
                     SCRAPE_PROGRESS["percent"] = 100
-                    SCRAPE_PROGRESS["status_text"] = f"Finished! Collected {new_in_session} new contacts ({len(db.get_pending_gmails())} total pending Gmails)."
+                    SCRAPE_PROGRESS["status_text"] = f"Finished! Collected {new_in_session} new contacts ({len(db.get_pending_gmails(username=u))} total pending Gmails)."
                 return all_saved, new_in_session, new_contacts_list
             finally:
                 SCRAPE_PROGRESS["is_running"] = False
@@ -804,6 +955,9 @@ def stop_scrape():
 
 @app.route("/api/upload-resume", methods=["POST"])
 def upload_resume():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     if 'resume' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
     file = request.files['resume']
@@ -854,30 +1008,21 @@ def upload_resume():
 
 @app.route("/api/generate", methods=["POST"])
 def generate_email():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
-    hr_name_raw = data.get("name", "Hiring Manager")
+    hr_name_raw = clean_name(data.get("name", "Hiring Manager"))
     hr_title    = data.get("title", "")
     post_text   = data.get("post_text", "")
     hr_email    = data.get("hr_email", "")
     req_model   = data.get("model") or MODEL
-    profile     = load_profile()
+    profile     = load_profile(username=u)
 
     # ── Correct name & post context for this specific email ──────────────────
-    # The raw post_text is often a LinkedIn feed blob containing multiple names
-    # and multiple emails. We must extract the owner of THIS email, not just the
-    # LinkedIn profile author stored as `name`.
     extracted_owner = extract_email_owner_name(post_text, hr_email)
-
-    # Resolve correct human name for this recipient
     hr_name = resolve_contact_name(extracted_owner or hr_name_raw, hr_email)
-
-    # Extract only the post portion relevant to this email
     relevant_post = extract_post_for_email(post_text, hr_email)
-
-    first_name = "there"
-    if hr_name and hr_name not in ["Unknown", "Hiring Manager", "LinkedIn Recruiter"]:
-        first_name = hr_name.split()[0].strip()
-
 
     structured_resume = load_json(STRUCTURED_RESUME_FILE, None)
     if structured_resume:
@@ -902,80 +1047,31 @@ def generate_email():
 - Skills: {profile['skills']}
 - Location: {profile['location']}"""
 
-    system_prompt = f"""You are a skilled AI/ML engineer ({cand_name}) writing a direct, high-converting cold email application to an engineering recruiter or hiring manager who posted on LinkedIn.
-
-{candidate_context}
-
-CRITICAL RULES TO ENSURE A 100% HUMAN, NON-ROBOTIC EMAIL:
-1. STRICTLY BANNED ROBOTIC CLICHES:
-   - NEVER use generic filler: 'I hope this email finds you well', 'I am writing to express my interest', 'I was excited/thrilled to see your post', 'esteemed organization', 'valuable asset', 'Dear Sir/Madam'.
-   - NEVER start with a formulaic bio: 'I am {cand_name}, an AI/ML Engineer with 2+ years of experience...'.
-2. OPENING HOOK (Sentence 1):
-   - Start naturally: 'Hi {first_name},'
-   - Immediately hook into their specific post: reference what they are actively hiring for, the specific role title, and any key technologies or urgency mentioned in their post.
-3. CONCRETE RELEVANCE & PROOF (Sentences 2-3):
-   - Pick 1 or 2 specific technical accomplishments from the Candidate Profile that directly solve what the recruiter is looking for.
-   - Mention real tools and metrics (e.g. vLLM, QLoRA, FastAPI, RAG, Docker, multi-cloud GPU orchestrators).
-   - DO NOT dump the entire resume. Be selective and hyper-relevant.
-4. LOW-FRICTION CLOSE:
-   - Note that your resume is attached for review.
-   - Low-friction ask: 5-10 minutes for a brief introductory call this week or next.
-5. LENGTH & STYLE:
-   - 70 to 100 words total. Clean, punchy paragraphs. Recruiters read on mobile and scan in 8 seconds.
-   - Sign off cleanly with: Best,\n{cand_name}
-   - Plain text only. No brackets or placeholders like [Your Name].
-
-Output format ONLY:
-Subject: <catchy, human subject line tailored to the post>
-
-<email body>"""
-
-    # Use the per-email relevant post snippet (already cleaned inside extract_post_for_email)
-    cleaned_post = relevant_post.strip()
-    if not cleaned_post:
-        cleaned_post = f"Hiring for {hr_title or 'AI/ML Engineer role'}."
-
-    user_msg = (
-        f"Recipient Email: {hr_email}\n"
-        f"Recruiter Name: {hr_name}\n"
-        f"Recruiter Headline / Company: {hr_title}\n\n"
-        f"Relevant LinkedIn Post Content (about this specific recruiter):\n{cleaned_post}\n\n"
-        "IMPORTANT: The email must start with 'Hi {first_name},' where {first_name} = the recruiter's first name above. "
-        "DO NOT mention any other recruiter's name. Write only about the job details in the post above.\n\n"
-        "Write the human, contextual cold email now."
-    ).format(first_name=first_name)
-
     try:
-        result = groq_stream([
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_msg},
-        ], model=req_model)
-
-        # Strip out reasoning blocks from thinking models (e.g. <think>...</think>)
-        clean_result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
-        if not clean_result:
-            clean_result = result  # fallback if whole output was inside think tags
-
-        subject, body = "", clean_result
-        if clean_result.lower().startswith("subject:"):
-            parts = clean_result.split('\n', 2)
-            subject = parts[0].replace("Subject:", "").replace("subject:", "").strip()
-            body = '\n'.join(parts[1:]).strip()
-        elif '\n' in clean_result:
-            # Try finding subject line anywhere in first 3 lines
-            lines = clean_result.split('\n')
-            for i, line in enumerate(lines[:4]):
-                if line.lower().startswith('subject:'):
-                    subject = line.replace("Subject:", "").replace("subject:", "").strip()
-                    body = '\n'.join(lines[i+1:]).strip()
-                    break
+        # ── Delegate to isolated email-drafting module with user's scoped API key ──
+        from pipeline.email_drafter import draft_email as _draft_email
+        is_openai = any(req_model.startswith(p) for p in ("gpt-", "o1", "o3", "chatgpt"))
+        user_api_key = (profile.get("openai_api_key") if is_openai else profile.get("groq_api_key")) or ""
+        draft = _draft_email(
+            hr_name=hr_name,
+            hr_title=hr_title,
+            hr_email=hr_email,
+            post_text=relevant_post,
+            candidate_context=candidate_context,
+            cand_name=cand_name,
+            model=req_model,
+            api_key=user_api_key,
+        )
+        subject = draft["subject"]
+        body    = draft["body"]
+        result  = draft["raw"]
 
         # Compute match & fit score with dynamic proportional normalization
         fit_data = {}
         try:
             from scorer import score_match
             fit_data = score_match(
-                post_text=post_text or cleaned_post,
+                post_text=post_text or relevant_post,
                 candidate_profile=profile,
                 hr_title=hr_title
             )
@@ -993,13 +1089,17 @@ Subject: <catchy, human subject line tailored to the post>
         return jsonify({"error": str(e)}), 500
 
 
+
 @app.route("/api/send", methods=["POST"])
 def send_email():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data     = request.json or {}
     to_email = data.get("to_email", "")
     subject  = data.get("subject", "")
     body     = data.get("body", "")
-    profile  = load_profile()
+    profile  = load_profile(username=u)
 
     sender   = (profile.get("gmail_sender") or "").strip()
     password = (profile.get("gmail_app_password") or "").strip().replace(" ", "")
@@ -1015,7 +1115,7 @@ def send_email():
     with SEND_LOCK:
         if clean_to in IN_FLIGHT_SENDS:
             return jsonify({"error": f"An email to {clean_to} is already in progress. Duplicate prevented."}), 400
-        if db.is_email_applied(clean_to):
+        if db.is_email_applied(clean_to, username=u):
             return jsonify({"error": f"Already applied to {clean_to}. Duplicate permanently prevented."}), 400
         IN_FLIGHT_SENDS.add(clean_to)
 
@@ -1050,26 +1150,28 @@ def send_email():
             smtp.login(sender, password)
             smtp.sendmail(sender, to_email, msg.as_string())
 
-        # Permanently record applied email in MongoDB and local file
+        # Permanently record applied email in user's sent collection (strictly NO CONTEXT, limit 200)
         to_name = resolve_contact_name(data.get("to_name"), clean_to)
-        db.mark_email_applied(clean_to, name=to_name, subject=subject, body=body)
+        db.mark_email_applied(clean_to, name=to_name, subject=subject, body=body, username=u)
 
-        emails = load_json(EMAILS_FILE, [])
+        drafts_file = get_user_drafts_file(u)
+        emails = load_json(drafts_file, [])
         for e in emails:
             if (e.get("to_email") or "").lower().strip() == clean_to:
                 e["status"] = "sent"
-        save_json(EMAILS_FILE, emails)
+        save_json(drafts_file, emails)
 
-        # Append to sent_log.json if not present
-        sent_log = load_json(SENT_LOG, [])
-        if not any((r.get("email") or r.get("to") or "").lower().strip() == clean_to for r in sent_log):
-            sent_log.append({
-                "email": clean_to,
-                "name": to_name,
-                "subject": subject,
-                "sent_at": datetime.now().isoformat()
-            })
-            save_json(SENT_LOG, sent_log)
+        # Append to sent_log.json if legacy user
+        if u == "legacy":
+            sent_log = load_json(SENT_LOG, [])
+            if not any((r.get("email") or r.get("to") or "").lower().strip() == clean_to for r in sent_log):
+                sent_log.append({
+                    "email": clean_to,
+                    "name": to_name,
+                    "subject": subject,
+                    "sent_at": datetime.now().isoformat()
+                })
+                save_json(SENT_LOG, sent_log)
 
         return jsonify({"ok": True, "message": f"Email sent to {to_email}"})
     except Exception as e:
@@ -1114,6 +1216,9 @@ def get_tailored_pdf_filename(email: str) -> str:
 
 @app.route("/api/resume/base-tex", methods=["GET"])
 def get_base_tex():
+    u = get_current_username()
+    if not u:
+        return jsonify({"tex": "", "filename": ""})
     if not LATEX_SOURCE_FILE.exists():
         return jsonify({"error": "Master resume.tex not found"}), 404
     return jsonify({
@@ -1142,6 +1247,9 @@ def serve_tailored_pdf(filename):
 
 @app.route("/api/resume/tailor", methods=["POST"])
 def tailor_resume():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     to_email = (data.get("to_email") or "generic").lower().strip()
     post_text = data.get("post_text", "")
@@ -1158,54 +1266,21 @@ def tailor_resume():
     else:
         base_tex = current_tex
 
-    profile = load_profile()
+    profile = load_profile(username=get_current_username())
     cand_name = profile.get("name") or "Parth Srivastava"
 
-    system_prompt = f"""You are an elite LaTeX Resume Customization Specialist for {cand_name}.
-Your job is to tailor the candidate's existing master LaTeX resume to be hyper-relevant for a specific job post while preserving truthfulness, structure, and 1-page geometry.
-
-CRITICAL RULES FOR RESUME TAILORING:
-1. STRICT LATEX INTEGRITY:
-   - Output MUST start with \\documentclass and end with \\end{{document}}.
-   - DO NOT alter the preamble, geometry, fontawesome5 icons, hyperref settings, section formatting, or document layout.
-   - Use standard LaTeX syntax. Escape special characters like % as \\%, & as \\&, _ as \\_.
-2. CONTENT CUSTOMIZATION:
-   - Skills Section (\\section*{{Skills}}):
-     - Prioritize and emphasize technologies explicitly requested in the recruiter post that align with candidate capabilities.
-     - Add relevant matching skills (e.g. if post asks for LangChain / FastAPI / Docker / AWS / NLP, ensure they are prominently listed).
-   - Experience & Projects:
-     - Slightly adjust bullet point phrasing to emphasize the specific outcomes and tech stack requested by the recruiter.
-     - Keep the facts, roles, companies, and dates 100% accurate (never invent fake companies or fake degrees).
-3. 1-PAGE PAGE-FIT CONSTRAINT:
-   - The compiled PDF MUST fit cleanly on exactly ONE page.
-   - Keep bullet points concise and punchy (1-2 lines per bullet). Do not add excessive vertical space.
-4. INCORPORATE USER REVISION FEEDBACK (if provided):
-   - If the user provides specific revision instructions (e.g. 'remove kafka', 'shorten project 2', 'emphasize vLLM'), implement those revisions strictly.
-5. OUTPUT FORMAT ONLY:
-   - Return ONLY the complete, raw LaTeX source code.
-   - DO NOT write any markdown commentary, explanation, or code fences (no ```latex)."""
-
-    user_prompt = f"""Recipient Recruiter Email: {to_email}
-Recruiter Role / Title: {hr_title}
-
-Job Post Context:
-\"\"\"{post_text[:3000]}\"\"\"
-
-User Revision Feedback (if any):
-\"\"\"{feedback or "Tailor the skills and project bullet points to maximize alignment with this job post."}\"\"\"
-
-Current Master LaTeX Resume:
-\"\"\"{base_tex}\"\"\"
-
-Provide the tailored complete LaTeX document now:"""
-
     try:
-        raw_result = groq_stream([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ], model=req_model)
-
-        tailored_tex = clean_latex_output(raw_result)
+        # ── Delegate to isolated resume-tailoring module ──────────────────────
+        from pipeline.resume_tailor import tailor_resume as _tailor_resume
+        tailored_tex = _tailor_resume(
+            base_tex=base_tex,
+            post_text=post_text,
+            hr_title=hr_title,
+            to_email=to_email,
+            feedback=feedback,
+            cand_name=cand_name,
+            model=req_model,
+        )
 
         # Compile via Docker XeLaTeX service
         pdf_bytes = compile_latex_via_service(tailored_tex)
@@ -1230,8 +1305,12 @@ Provide the tailored complete LaTeX document now:"""
         return jsonify({"error": str(e)}), 500
 
 
+
 @app.route("/api/resume/compile-raw", methods=["POST"])
 def compile_raw_resume():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     to_email = (data.get("to_email") or "generic").lower().strip()
     tex_code = data.get("tex", "").strip()
@@ -1340,10 +1419,13 @@ def inject_skills_into_resume(base_tex: str, skills_to_add: list[str]) -> str:
 
 @app.route("/api/resume/quick-tailor-skills", methods=["POST"])
 def quick_tailor_skills():
+    r"""
+    Surgically tailors ONLY the skill lines inside \section*{Skills}.
+    Never modifies section boundaries, \titlerule, \section*{Experience}, or document layout.
     """
-    Surgically tailors ONLY the skill lines inside \\section*{Skills}.
-    Never modifies section boundaries, \\titlerule, \\section*{Experience}, or document layout.
-    """
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data = request.json or {}
     to_email = (data.get("to_email") or "generic").lower().strip()
     post_text = data.get("post_text", "")
@@ -1361,7 +1443,7 @@ def quick_tailor_skills():
 
     # Extract missing skills from post requirements
     from scorer import extract_post_requirements, is_skill_matched, load_all_candidate_skills, score_match
-    profile = load_profile()
+    profile = load_profile(username=get_current_username())
     reqs = extract_post_requirements(post_text, hr_title)
     cand_skills_set, full_text = load_all_candidate_skills(profile)
 
@@ -1427,8 +1509,12 @@ def quick_tailor_skills():
 
 @app.route("/api/save-email", methods=["POST"])
 def save_email():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
     data   = request.json or {}
-    emails = load_json(EMAILS_FILE, [])
+    drafts_file = get_user_drafts_file(u)
+    emails = load_json(drafts_file, [])
     to_email = data.get("to_email", "")
     clean_email = to_email.lower().strip()
     data["to_name"] = resolve_contact_name(data.get("to_name"), clean_email)
@@ -1441,7 +1527,7 @@ def save_email():
     else:
         # Prepend new drafts so newest drafts are always at the top!
         emails.insert(0, data)
-    save_json(EMAILS_FILE, emails)
+    save_json(drafts_file, emails)
     return jsonify({"ok": True})
 
 
