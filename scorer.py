@@ -164,11 +164,28 @@ def _regex_fallback_extract(text: str, hr_title: str = "") -> Dict[str, Any]:
     }
 
 
+def _normalize_skill_text(text: str) -> str:
+    if not text:
+        return ""
+    # Normalize unicode non-breaking hyphens, en-dashes, em-dashes, and smart quotes
+    return (
+        text.replace('\u2011', '-')
+            .replace('\u2013', '-')
+            .replace('\u2014', '-')
+            .replace('\u2212', '-')
+            .replace('\u2018', "'")
+            .replace('\u2019', "'")
+            .replace('\u201c', '"')
+            .replace('\u201d', '"')
+            .lower()
+    )
+
+
 def load_all_candidate_skills(candidate_profile: Dict[str, Any]) -> tuple[set, str]:
     """
     Extracts all candidate skills and full text from:
-    1. latex_resume/resume.tex (the master source of truth!)
-    2. output/structured_resume.json
+    1. latex_resume/resume.tex (master LaTeX resume, scanning Skills, Projects, and Experience)
+    2. output/structured_resume.json (key_skills, skills, key_projects_or_achievements)
     3. candidate_profile dictionary
     """
     skills_set = set()
@@ -182,18 +199,36 @@ def load_all_candidate_skills(candidate_profile: Dict[str, Any]) -> tuple[set, s
     if os.path.exists(tex_path):
         try:
             with open(tex_path, "r", encoding="utf-8", errors="ignore") as f:
-                tex_content = f.read()
-            full_text += " " + tex_content.lower()
+                tex_content = _normalize_skill_text(f.read())
+            full_text += " " + tex_content
 
             # Extract from \section*{Skills}
-            skills_match = re.search(r'\\section\*\{Skills\}(.*?)(?:\\section|\Z)', tex_content, re.DOTALL)
+            skills_match = re.search(r'\\section\*\{skills\}(.*?)(?:\\section|\Z)', tex_content, re.DOTALL)
             if skills_match:
                 clean_skills = re.sub(r'\\[a-zA-Z]+\*?(?:\{.*?\})?', ' ', skills_match.group(1))
                 clean_skills = re.sub(r'[{}\\_&%]', ' ', clean_skills)
                 for token in re.split(r'[,|/•\n:\-]', clean_skills):
-                    t = token.strip().lower()
+                    t = token.strip()
                     if t and len(t) >= 2:
                         skills_set.add(t)
+
+            # Also extract tech mentioned in \textit{...} lines under Projects and Experience
+            for it_match in re.finditer(r'\\textit\{([^}]+)\}', tex_content):
+                it_text = re.sub(r'[{}\\_&%]', ' ', it_match.group(1))
+                for token in re.split(r'[,|/•\n:\-]', it_text):
+                    t = token.strip()
+                    if t and len(t) >= 2 and not any(skip in t for skip in ("present", "personal project", "technologies", "github", "modeva")):
+                        skills_set.add(t)
+
+            # Direct scan for modern models and tools in full text
+            modern_keywords = [
+                "qwen2.5", "qwen", "vllm", "qlora", "peft", "runpod", "novita",
+                "langchain", "langgraph", "fastapi", "pytorch", "hugging face",
+                "docker", "airflow", "prometheus", "locust", "stable diffusion", "comfyui"
+            ]
+            for kw in modern_keywords:
+                if kw in tex_content:
+                    skills_set.add(kw)
         except Exception:
             pass
 
@@ -203,13 +238,29 @@ def load_all_candidate_skills(candidate_profile: Dict[str, Any]) -> tuple[set, s
         try:
             with open(struct_path, "r", encoding="utf-8", errors="ignore") as f:
                 struct_data = json.load(f)
-            for s in struct_data.get("skills", []):
+
+            # Check both key_skills and skills
+            raw_skills = struct_data.get("key_skills", []) or struct_data.get("skills", [])
+            for s in raw_skills:
                 if isinstance(s, str) and s.strip():
-                    skills_set.add(s.strip().lower())
-            for proj in struct_data.get("projects", []):
-                for tech in proj.get("technologies", []):
-                    if isinstance(tech, str) and tech.strip():
-                        skills_set.add(tech.strip().lower())
+                    clean_s = _normalize_skill_text(s.strip())
+                    skills_set.add(clean_s)
+                    full_text += " " + clean_s
+
+            # Extract from project descriptions and achievements
+            raw_projs = struct_data.get("key_projects_or_achievements", []) or struct_data.get("projects", [])
+            for p in raw_projs:
+                p_text = ""
+                if isinstance(p, str):
+                    p_text = _normalize_skill_text(p)
+                elif isinstance(p, dict):
+                    p_text = _normalize_skill_text(json.dumps(p))
+                full_text += " " + p_text
+                # Scan for tech keywords mentioned in projects
+                for token in re.split(r'[,|/•\n:\s]', p_text):
+                    if len(token) >= 3 and any(c.isalpha() for c in token):
+                        if token in ("qwen2.5", "qwen", "vllm", "qlora", "peft", "runpod", "rag", "docker", "fastapi", "airflow", "prometheus"):
+                            skills_set.add(token)
         except Exception:
             pass
 
@@ -217,46 +268,77 @@ def load_all_candidate_skills(candidate_profile: Dict[str, Any]) -> tuple[set, s
     if candidate_profile:
         cand_skills_raw = candidate_profile.get("skills", "")
         for s in re.split(r'[,|/•\n]', str(cand_skills_raw)):
-            t = s.strip().lower()
+            t = _normalize_skill_text(s.strip())
             if t:
                 skills_set.add(t)
+                full_text += " " + t
 
     return skills_set, full_text
 
 
 def is_skill_matched(req_skill: str, candidate_skills: set, full_resume_text: str, candidate_role: str) -> bool:
     """Checks if a required skill is covered by candidate skills or resume text."""
-    req_clean = req_skill.strip().lower()
+    req_clean = _normalize_skill_text(req_skill.strip())
     if not req_clean:
         return False
 
-    # Direct match in skills set or substring
-    if req_clean in candidate_skills:
+    norm_skills = {_normalize_skill_text(cs) for cs in candidate_skills if cs}
+    norm_full_text = _normalize_skill_text(full_resume_text)
+
+    # 1. Direct match in candidate_skills set or substring
+    if req_clean in norm_skills:
         return True
-    if any(req_clean in cs or cs in req_clean for cs in candidate_skills if len(cs) >= 3):
+    if any(req_clean == cs or (len(cs) >= 3 and (req_clean in cs or cs in req_clean)) for cs in norm_skills):
         return True
 
-    # Exact token or phrase match in full resume text (e.g. LangGraph, API, Vector Databases)
-    clean_kw = re.sub(r'[^a-z0-9+#]', ' ', req_clean).strip()
-    if clean_kw and re.search(r'\b' + re.escape(clean_kw) + r'\b', full_resume_text):
+    # 2. Direct substring match in full resume text (e.g. "qwen2.5" in text)
+    if req_clean in norm_full_text:
         return True
 
-    # Multi-word alias checks
-    if "langgraph" in req_clean and ("langgraph" in full_resume_text or "langgraph" in candidate_skills):
-        return True
-    if "api" in req_clean and ("api" in candidate_skills or "fastapi" in candidate_skills or "api" in full_resume_text):
-        return True
-    if "vector" in req_clean and ("vector" in full_resume_text or "rag" in candidate_skills or "rag" in full_resume_text):
-        return True
-    if "rag" in req_clean and ("rag" in candidate_skills or "rag" in full_resume_text):
-        return True
-    if ("llm" in req_clean or "large language" in req_clean) and ("llm" in candidate_skills or "fine-tuning" in full_resume_text):
-        return True
-    if "agent" in req_clean and ("agent" in candidate_skills or "agent" in full_resume_text):
+    # 3. Punctuation/version collapsed match (e.g. "qwen 2.5" vs "qwen2.5" vs "qwen-2.5")
+    collapsed_req = re.sub(r'[\.\-\s_]', '', req_clean)
+    collapsed_text = re.sub(r'[\.\-\s_]', '', norm_full_text)
+    if collapsed_req and len(collapsed_req) >= 3 and collapsed_req in collapsed_text:
         return True
 
-    # Role overlap
-    if req_clean in candidate_role:
+    # 4. Model/Library stem match (e.g. "qwen" in "qwen2.5-0.5b", "llama" in "llama-3.1", "deepseek" in "deepseek-r1")
+    alpha_stem = re.sub(r'[\.\-\d\s_]', '', req_clean)
+    if alpha_stem and len(alpha_stem) >= 4 and alpha_stem in norm_full_text:
+        return True
+
+    # 5. Word boundary match with preserved punctuation
+    clean_kw = re.sub(r'[^a-z0-9+#\.\-]', ' ', req_clean).strip()
+    if clean_kw and re.search(r'(?i)(?:\b|[^a-z0-9])' + re.escape(clean_kw) + r'(?:[^a-z0-9]|\b)', norm_full_text):
+        return True
+
+    # 6. Multi-word and technology alias checks
+    aliases = {
+        "next.js": ["nextjs", "next"],
+        "node.js": ["nodejs", "node"],
+        "c++": ["cpp", "c plus plus"],
+        "c#": ["csharp", "c sharp"],
+        "postgres": ["postgresql"],
+        "postgresql": ["postgres"],
+        "scikit-learn": ["sklearn", "scikit"],
+        "hugging face": ["huggingface", "transformers"],
+        "langgraph": ["langchain"],
+        "peft": ["qlora", "lora", "fine-tuning"],
+        "qlora": ["lora", "peft", "fine-tuning"],
+        "qwen": ["qwen2.5", "qwen2"],
+        "qwen2.5": ["qwen"],
+        "rag": ["vector", "retrieval augmented", "retrieval-augmented"],
+        "api": ["fastapi", "rest api", "apis", "endpoints"],
+        "docker": ["containers", "containerization"]
+    }
+    for base_k, alt_list in aliases.items():
+        if base_k in req_clean or any(alt in req_clean for alt in alt_list):
+            if base_k in norm_full_text or any(alt in norm_full_text for alt in alt_list):
+                return True
+            if base_k in norm_skills or any(alt in norm_skills for alt in alt_list):
+                return True
+
+    # 7. Role overlap
+    if candidate_role and req_clean in _normalize_skill_text(candidate_role):
         return True
 
     return False

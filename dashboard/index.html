@@ -1575,7 +1575,7 @@
           <div class="user-avatar-circle" id="sidebar-user-avatar">👤</div>
           <div class="user-info-text">
             <div class="user-name" id="sidebar-user-name">Guest (Not Signed In)</div>
-            <div class="user-email" id="sidebar-user-email">Sign in with Clerk to save leads</div>
+            <div class="user-email" id="sidebar-user-email">Sign in to save leads</div>
           </div>
           <span style="color: #94a3b8; font-size: 11px;">›</span>
         </div>
@@ -1619,8 +1619,8 @@
         <!-- WORKFLOW COLUMN -->
         <div class="workflow-column">
 
-          <!-- ── CLERK AUTH WELCOME BANNER (for unauthenticated visitors) ── -->
-          <div id="clerk-auth-gate" style="display:none; background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color:#fff; border-radius:12px; padding:16px 20px; margin-bottom:16px; align-items:center; justify-content:space-between; box-shadow: 0 4px 14px rgba(37,99,235,0.25);">
+          <!-- ── WELCOME BANNER (for unauthenticated visitors) ── -->
+          <div id="clerk-auth-gate" style="display:none; background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color:#fff; border-radius:12px; padding:16px 20px; margin-bottom:16px; align-items:center; box-shadow: 0 4px 14px rgba(37,99,235,0.25);">
             <div>
               <div style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;">
                 <span>🔐</span> Welcome! Sign In to Save Your Leads & Applications
@@ -1629,9 +1629,6 @@
                 Sign in with your username or Gmail to store your contacts and sent emails under your personal account (100 pending & 200 sent limit).
               </div>
             </div>
-            <button class="btn btn-xs" onclick="openClerkAuth()" style="background:#ffffff; color:#1d4ed8; font-weight:700; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; white-space:nowrap;">
-              Sign In with Clerk →
-            </button>
           </div>
 
           <!-- ── HERO BANNER & METRICS ── -->
@@ -1750,14 +1747,14 @@
 
             <div class="resume-attach-box">
               <div class="resume-file-info">
-                <span class="pdf-badge-icon">PDF</span>
+                <span class="pdf-badge-icon" id="resume-badge-icon">PDF</span>
                 <div>
-                  <div class="resume-main-name" id="resume-filename">parth_resume.pdf</div>
-                  <div class="resume-meta-subtitle">234 KB • Ready to attach to outgoing emails</div>
+                  <div class="resume-main-name" id="resume-filename">No resume uploaded</div>
+                  <div class="resume-meta-subtitle" id="resume-meta-subtitle">Sign in to upload and attach your resume</div>
                 </div>
               </div>
-              <button class="btn btn-light-gray btn-xs" onclick="document.getElementById('resume-file').click()">
-                Change File
+              <button class="btn btn-light-gray btn-xs" id="resume-action-btn" onclick="handleResumeBtnClick()">
+                Upload Resume
               </button>
               <input type="file" id="resume-file" style="display:none" accept=".pdf,.doc,.docx" onchange="uploadResume(this)" />
             </div>
@@ -2076,8 +2073,24 @@
       const quotaEl = document.getElementById('quota-text');
       if (quotaEl) quotaEl.textContent = '🔒 Sign In Required';
 
+      const resNameEl = document.getElementById('resume-filename');
+      if (resNameEl) resNameEl.textContent = 'No resume uploaded';
+      const resSubEl = document.getElementById('resume-meta-subtitle');
+      if (resSubEl) resSubEl.textContent = 'Sign in to upload and attach your resume';
+      const resBtn = document.getElementById('resume-action-btn');
+      if (resBtn) resBtn.textContent = 'Upload Resume';
+
       renderContacts();
       renderDrafts();
+    }
+
+    function handleResumeBtnClick() {
+      if (!currentUsername) {
+        toast('Please sign in first to upload or change your resume', 'warning');
+        openClerkAuth();
+        return;
+      }
+      document.getElementById('resume-file').click();
     }
 
     async function init() {
@@ -2160,7 +2173,7 @@
               const sidebarNameEl = document.getElementById('sidebar-user-name');
               if (sidebarNameEl) sidebarNameEl.textContent = 'Guest (Not Signed In)';
               const sidebarEmailEl = document.getElementById('sidebar-user-email');
-              if (sidebarEmailEl) sidebarEmailEl.textContent = 'Sign in with Clerk to save leads';
+              if (sidebarEmailEl) sidebarEmailEl.textContent = 'Sign in to save leads';
               const avatarEl = document.getElementById('sidebar-user-avatar');
               if (avatarEl) avatarEl.textContent = '👤';
 
@@ -2195,7 +2208,7 @@
           console.error(e);
         }
       } else {
-        toast('Clerk auth is still initializing, please wait a moment...', 'info');
+        toast('Authentication is still initializing, please wait a moment...', 'info');
       }
     }
 
@@ -2278,7 +2291,7 @@
 
     async function generateAiQueries() {
       if (!currentUsername) {
-        toast('Please sign in with Clerk first to generate queries', 'warning');
+        toast('Please sign in first to generate queries', 'warning');
         openClerkAuth();
         return;
       }
@@ -2309,7 +2322,7 @@
 
     async function startScrapeWithValues() {
       if (!currentUsername) {
-        toast('Please sign in with Clerk first to run scraper and store contacts', 'warning');
+        toast('Please sign in first to run scraper and store contacts', 'warning');
         openClerkAuth();
         return;
       }
@@ -2383,13 +2396,24 @@
     async function loadProfile() {
       if (!currentUsername) {
         profile = {};
+        renderLockedState();
         return;
       }
       try {
         const res = await apiFetch('/api/profile');
         profile = await res.json();
+        const resNameEl = document.getElementById('resume-filename');
+        const resSubEl = document.getElementById('resume-meta-subtitle');
+        const resBtn = document.getElementById('resume-action-btn');
+
         if (profile.resume_filename) {
-          document.getElementById('resume-filename').textContent = profile.resume_filename;
+          if (resNameEl) resNameEl.textContent = profile.resume_filename;
+          if (resSubEl) resSubEl.textContent = 'Ready to attach to outgoing emails';
+          if (resBtn) resBtn.textContent = 'Change File';
+        } else {
+          if (resNameEl) resNameEl.textContent = 'No resume uploaded';
+          if (resSubEl) resSubEl.textContent = 'Upload your resume to tailor and attach to outreach emails';
+          if (resBtn) resBtn.textContent = 'Upload Resume';
         }
         if (profile.name) {
           document.getElementById('sidebar-user-name').textContent = profile.name;
@@ -2467,7 +2491,7 @@
               Recruiter emails and outreach pipelines are private to your personal account. Sign in to view and manage your contacts.
             </div>
             <button class="btn btn-primary-blue btn-xs" onclick="openClerkAuth()" style="margin:0 auto; display:inline-flex; align-items:center; gap:6px;">
-              <span>🔐</span> Sign In with Clerk
+              <span>🔐</span> Sign In
             </button>
           </div>
         `;
@@ -2600,7 +2624,7 @@
 
     async function draftForContact(email, btn) {
       if (!currentUsername) {
-        toast('Please sign in with Clerk first to draft emails', 'warning');
+        toast('Please sign in first to draft emails', 'warning');
         openClerkAuth();
         return;
       }
@@ -3014,7 +3038,7 @@
 
     async function generateBatchDrafts() {
       if (!currentUsername) {
-        toast('Please sign in with Clerk first to generate drafts', 'warning');
+        toast('Please sign in first to generate drafts', 'warning');
         openClerkAuth();
         return;
       }
@@ -3070,7 +3094,7 @@
 
     async function applyToAll() {
       if (!currentUsername) {
-        toast('Please sign in with Clerk first', 'warning');
+        toast('Please sign in first', 'warning');
         openClerkAuth();
         return;
       }
@@ -3084,7 +3108,7 @@
 
     async function tailorAllDraftResumes() {
       if (!currentUsername) {
-        toast('Please sign in with Clerk first', 'warning');
+        toast('Please sign in first', 'warning');
         openClerkAuth();
         return;
       }
@@ -3111,7 +3135,7 @@
 
     function openSettings() {
       if (!currentUsername) {
-        toast('Please sign in with Clerk to access settings', 'info');
+        toast('Please sign in to access settings', 'info');
         openClerkAuth();
         return;
       }
@@ -3151,6 +3175,11 @@
     }
 
     async function uploadResume(input) {
+      if (!currentUsername) {
+        toast('Please sign in first to upload your resume', 'warning');
+        openClerkAuth();
+        return;
+      }
       if (!input.files || !input.files[0]) return;
       const formData = new FormData();
       formData.append('resume', input.files[0]);

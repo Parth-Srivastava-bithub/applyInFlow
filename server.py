@@ -112,14 +112,12 @@ def check_and_migrate_legacy_for_owner(u: str):
     If the authenticated user matches the owner/creator (Parth),
     automatically adopt existing legacy documents in MongoDB into their username.
     """
-    if u in ("parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com"):
+    if u in ("parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com", "yellowforesty"):
         mdb = db.get_mongo_db()
         if mdb is not None:
             try:
-                legacy_count = mdb[db.EMAILS_COLLECTION].count_documents({"username": "legacy"})
-                if legacy_count > 0:
-                    mdb[db.EMAILS_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
-                    mdb[db.APPLIED_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
+                mdb[db.EMAILS_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
+                mdb[db.APPLIED_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
             except Exception:
                 pass
 
@@ -707,6 +705,29 @@ def get_emails():
         d["to_name"] = resolve_contact_name(d.get("to_name"), em)
         pending_drafts.append(d)
 
+    # Dynamically verify missing_tags against current resume skills so false-missing tags turn green
+    try:
+        from scorer import load_all_candidate_skills, is_skill_matched
+        cand_skills, full_text = load_all_candidate_skills(load_profile(username=u))
+        for d in pending_drafts:
+            fit = d.get("fit")
+            if isinstance(fit, dict) and "missing_tags" in fit and fit["missing_tags"]:
+                still_missing = []
+                matched = list(fit.get("matched_tags") or [])
+                for tag in fit["missing_tags"]:
+                    tag_clean = re.sub(r'^[✕✓~]\s*', '', str(tag)).strip()
+                    if is_skill_matched(tag_clean, cand_skills, full_text, ""):
+                        tag_match = f"✓ {tag_clean}"
+                        if tag_match not in matched:
+                            matched.append(tag_match)
+                        has_changes = True
+                    else:
+                        still_missing.append(tag)
+                fit["missing_tags"] = still_missing
+                fit["matched_tags"] = matched
+    except Exception as e:
+        logger.warning(f"Error validating dynamic fit tags: {e}")
+
     if has_changes:
         save_json(drafts_file, drafts)
 
@@ -976,7 +997,7 @@ def upload_resume():
         save_json(STRUCTURED_RESUME_FILE, structured_data)
 
         # Sync profile settings
-        profile = load_profile()
+        profile = load_profile(username=u)
         profile['resume_filename'] = filename
         if parsed_profile.name:
             profile['name'] = parsed_profile.name
@@ -993,11 +1014,15 @@ def upload_resume():
         if parsed_profile.phone:
             profile['phone'] = parsed_profile.phone
             
-        save_json(PROFILE_FILE, profile)
+        save_json(get_user_profile_file(u), profile)
+        if u == "legacy":
+            save_json(PROFILE_FILE, profile)
     except Exception:
-        profile = load_profile()
+        profile = load_profile(username=u)
         profile['resume_filename'] = filename
-        save_json(PROFILE_FILE, profile)
+        save_json(get_user_profile_file(u), profile)
+        if u == "legacy":
+            save_json(PROFILE_FILE, profile)
 
     return jsonify({
         "ok": True,

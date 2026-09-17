@@ -229,6 +229,16 @@ def migrate_legacy_data(db=None):
         return
 
     try:
+        # Drop legacy single-user unique index on email if present
+        for col in (db.emails, db.applied_emails):
+            try:
+                for idx in col.list_indexes():
+                    if idx.get("name") == "email_1" and idx.get("unique"):
+                        col.drop_index("email_1")
+                        logger.info(f"Dropped obsolete unique index 'email_1' from {col.name}")
+            except Exception:
+                pass
+
         # 1. Update emails collection: tag documents missing username with 'legacy'
         db.emails.update_many({"username": {"$exists": False}}, {"$set": {"username": "legacy"}})
         db.emails.create_index([("username", 1), ("email", 1)], unique=True)
