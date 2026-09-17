@@ -20,7 +20,7 @@ if (-not $chromeExe) {
     exit 1
 }
 
-$profileDir = "C:\Users\user\Documents\GPU_AGGREGATE\chrome_cdp_profile"
+$profileDir = "$PSScriptRoot\chrome_profile"
 
 Write-Host "Found Chrome at: $chromeExe" -ForegroundColor Green
 Write-Host "Using Profile  : $profileDir" -ForegroundColor Green

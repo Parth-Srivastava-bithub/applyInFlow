@@ -11,7 +11,7 @@ set CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
 if not exist %CHROME_PATH% set CHROME_PATH="C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 if not exist %CHROME_PATH% set CHROME_PATH="%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
 
-set PROFILE_DIR="C:\Users\user\Documents\GPU_AGGREGATE\chrome_cdp_profile"
+set PROFILE_DIR="%~dp0chrome_profile"
 
 echo Using Chrome executable: %CHROME_PATH%
 echo Using profile directory : %PROFILE_DIR%

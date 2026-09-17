@@ -1,96 +1,141 @@
 # AutoApply — Complete Startup & Operations Guide
 
-This guide provides everything needed to start and run the AutoApply ecosystem effectively.
+Yeh guide me AutoApply ko scratch se run karne aur close karne ka complete flow likha hai (Windows aur macOS / Linux dono ke liye).
 
 ---
 
-## 🚀 Quick Start (All-in-One)
+## 🛑 How to Stop / Close Everything (Scratch se run karne se pehle)
 
-To run the complete system, launch the 3 components:
+Agar purane processes chal rahe hain toh unhe band karne ke commands:
 
-### 1. Start LaTeX Compiler Microservice (Docker)
-Compiles customized resumes (`resume.tex`) into PDFs via XeLaTeX with `fontawesome5` support.
+### **Windows (PowerShell)**:
+```powershell
+# 1. Stop Python Server (Port 5000)
+Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 2. Stop Chrome Debugging (Port 9222) if needed
+Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 3. Stop Docker LaTeX compiler (optional)
+docker stop latex-compiler
+```
+
+### **macOS / Linux**:
+```bash
+# 1. Stop Python Server (Port 5000)
+pkill -f "python.*server.py"
+
+# 2. Stop Chrome Debugging (Port 9222)
+kill $(lsof -t -i:9222) 2>/dev/null
+
+# 3. Stop Docker LaTeX compiler (optional)
+docker stop latex-compiler
+```
+
+---
+
+## 🚀 How to Run AutoApply From Scratch (Step-by-Step)
+
+AutoApply ecosystem me **3 components** hote hain:
+
+```
+[1. Docker LaTeX Compiler] ➔ Compiles resume.tex via XeLaTeX (Port 8001)
+[2. Google Chrome with CDP] ➔ Scrapes LinkedIn HR posts safely without bot detection (Port 9222)
+[3. Python Server & Web UI] ➔ Flask API, Groq AI tailoring & cold email pipeline (Port 5000)
+```
+
+---
+
+### Step 1: Start LaTeX Compiler Microservice (Docker)
+Resumes ko custom PDF me compile karne ke liye XeLaTeX microservice:
 
 ```bash
 cd latex_resume
 docker-compose up -d
+cd ..
 ```
-*Verify it is running:*
+*Check if running:*
 ```bash
 curl http://localhost:8001/health
-# Output: {"status":"ok","service":"latex-compiler","engine":"xelatex"}
+# Response: {"status":"ok","service":"latex-compiler","engine":"xelatex"}
 ```
 
 ---
 
-### 2. Start Chrome with Remote Debugging (Port 9222)
-Connects Playwright to your real Chrome session for scraping LinkedIn HR posts without login friction.
+### Step 2: Start Google Chrome with Remote Debugging (Port 9222)
 
-**On Windows (PowerShell or Command Prompt):**
-```cmd
-start_chrome.bat
-```
-*Or via PowerShell:*
+> ⚠️ **PowerShell Note**: PowerShell me `./` ya `.\` lagana zaroori hota hai current directory ke script ke aage!
+
+#### **Windows (PowerShell)**:
 ```powershell
 .\start_chrome.ps1
 ```
+*(Ya CMD me: `start_chrome.bat`)*
 
-> **Note:** Log in to LinkedIn once in this browser window. Your login session & cookies will be preserved in `chrome_profile/`.
+#### **macOS / Linux**:
+```bash
+chmod +x start_chrome.sh
+./start_chrome.sh
+```
+
+#### **Manual Command (Agar script use nahi karni)**:
+* **Windows**:
+  ```cmd
+  "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="./chrome_profile" https://www.linkedin.com
+  ```
+* **macOS**:
+  ```bash
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="./chrome_profile" https://www.linkedin.com
+  ```
+* **Linux**:
+  ```bash
+  google-chrome --remote-debugging-port=9222 --user-data-dir="./chrome_profile" https://www.linkedin.com
+  ```
+
+> 🔑 **1-Time Login**: Jo Chrome window khulegi, usme ek baar apna **LinkedIn account login** kar lein. Cookies `./chrome_profile` me save ho jayengi. Baar-baar login nahi karna padega!
 
 ---
 
-### 3. Start Python Backend & Web Dashboard
-Runs the Flask API, Groq AI query generation, email generator, and resume tailoring engine.
+### Step 3: Start Python Backend & Web Dashboard
 
+#### **Windows (PowerShell / CMD)**:
+```powershell
+# Virtual environment activate karein
+.\.venv\Scripts\Activate.ps1
+
+# Server start karein
+python server.py
+```
+
+#### **macOS / Linux**:
 ```bash
-# Windows
-.venv\Scripts\python.exe server.py
+# Virtual environment activate karein
+source .venv/bin/activate
 
-# Linux / macOS
+# Server start karein
 python3 server.py
 ```
 
-Dashboard will be live at:
+---
+
+### Step 4: Open Dashboard & Use!
+
+Browser me open karein:
 👉 **`http://localhost:5000`**
 
----
-
-## 🛠️ Docker Management Commands (LaTeX Compiler)
-
-| Action | Command |
-| :--- | :--- |
-| **Start in background** | `docker-compose up -d` (inside `latex_resume/`) |
-| **View live logs** | `docker logs -f latex-compiler` |
-| **Restart container** | `docker restart latex-compiler` |
-| **Stop container** | `docker-compose down` |
-| **Rebuild after code changes** | `docker-compose up -d --build` |
+1. **Sign In** par click karein.
+2. **Settings (⚙)** open karke apna free **Groq API Key** aur Gmail app password daalein (agar pehle se `.env` me nahi hai).
+3. **Step 1**: Target role (e.g. `AI ML Engineer`) daal kar **"Search LinkedIn for HR Emails"** par click karein.
+4. **Step 2**: Apna master resume upload ya review karein.
+5. **Step 3 & 4**: **Generate Drafts** par click karein, match scores dekhein, resume customize karein aur personalized emails send karein!
 
 ---
 
-## 🎯 Features Workflow
+## 📋 Summary of Quick Commands
 
-1. **Step 1: Search Keywords**: Enter target roles (e.g. `AI ML Engineer`) and click **Search LinkedIn for HR Gmails**.
-2. **Step 2: Resume Attachment**: Your master `latex_resume/resume.tex` is linked automatically.
-3. **Step 3: Outreach Controls**: Choose AI model (Groq Qwen 3.8 27B / GPT-OSS 120B), filter criteria, and click **⚡ Generate Drafts**.
-4. **Step 4: Match Fit & Interactive Tailoring**:
-   - Every draft shows a **Match Score Badge** (`🟢 100% Match`, `[✓ Domain Fit]`).
-   - Click **🎯 Tailor Resume** on any draft to open the **Live PDF Preview & AI Refinement Modal**.
-   - Review page fit / layout, type feedback (e.g., *"add Docker, shorten bullet 2"*), or edit raw LaTeX directly.
-   - Click **✅ Use Tailored Resume for this Email** to bind the custom PDF to that application.
-5. **Send Email**: Sends via Gmail SMTP with the tailored PDF attached.
-
----
-
-## 🧪 Testing Commands
-
-### Test LaTeX Compilation:
-```powershell
-$tex = Get-Content -Raw -Path "latex_resume/resume.tex"
-$payload = @{ tex = $tex; engine = "xelatex" } | ConvertTo-Json -Depth 2
-Invoke-RestMethod -Uri "http://localhost:8001/compile" -Method Post -Body $payload -ContentType "application/json" -OutFile "output/test_resume.pdf"
-```
-
-### Test Backend Match & Tailoring API:
-```powershell
-Invoke-RestMethod -Uri "http://localhost:5000/api/resume/base-tex" -Method Get
-```
+| Component | Windows (PowerShell) | macOS / Linux | Port |
+| :--- | :--- | :--- | :--- |
+| **1. LaTeX Docker** | `docker-compose -f latex_resume/docker-compose.yml up -d` | `docker-compose -f latex_resume/docker-compose.yml up -d` | `8001` |
+| **2. Chrome CDP** | `.\start_chrome.bat` ya `.\start_chrome.ps1` | `./start_chrome.sh` | `9222` |
+| **3. Web App** | `python server.py` | `python3 server.py` | `5000` |
+| **Dashboard URL**| Open `http://localhost:5000` | Open `http://localhost:5000` | — |

@@ -76,18 +76,40 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. Launch Chrome with Remote Debugging
+### 2. Launch Google Chrome with CDP (Remote Debugging Port 9222)
 
-Close any existing Chrome instances or run the helper script:
+AutoApply connects to your real Google Chrome session via Chrome DevTools Protocol (CDP) on port 9222. This completely bypasses LinkedIn bot checks and 2FA logins because it reuses your normal browser session.
 
-**On Windows:**
-Double-click `start_chrome.bat` or run:
-```cmd
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\.chrome-playwright-session" https://www.linkedin.com
-```
+Run the launch script for your OS:
 
-### 3. Log In to LinkedIn
-In the Chrome window that opens, log into LinkedIn manually.
+- **Windows (Double-click or run in terminal)**:
+  ```cmd
+  start_chrome.bat
+  ```
+  *(Or in PowerShell: `.\start_chrome.ps1`)*
+
+- **macOS / Linux**:
+  ```bash
+  chmod +x start_chrome.sh
+  ./start_chrome.sh
+  ```
+
+- **Manual Terminal Command**:
+  ```bash
+  # Windows
+  "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="./chrome_profile" https://www.linkedin.com
+
+  # macOS
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="./chrome_profile" https://www.linkedin.com
+
+  # Linux
+  google-chrome --remote-debugging-port=9222 --user-data-dir="./chrome_profile" https://www.linkedin.com
+  ```
+
+### 3. Log In to LinkedIn (1-Time)
+1. In the Chrome window that just opened, log into your LinkedIn account manually.
+2. Complete any 2FA/SMS code if prompted.
+3. Cookies and login tokens are automatically saved inside `./chrome_profile`. You only have to log in once! AutoApply will reuse this session every time.
 
 ### 4. Run the Job Scraper (AI/ML Engineer Jobs)
 To search for AI/ML Engineer jobs and extract them into a JSON file:
