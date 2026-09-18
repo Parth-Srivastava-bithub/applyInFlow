@@ -3152,6 +3152,24 @@
       }
     }
 
+    let draftSortOrder = 'score';
+
+    function changeDraftSort(val) {
+      draftSortOrder = val;
+      sortAndRenderDrafts();
+    }
+
+    function sortAndRenderDrafts() {
+      if (drafts && drafts.length) {
+        if (draftSortOrder === 'score') {
+          drafts.sort((a, b) => ((b.fit && b.fit.fit_score) || 0) - ((a.fit && a.fit.fit_score) || 0));
+        } else if (draftSortOrder === 'date') {
+          drafts.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        }
+      }
+      renderDrafts();
+    }
+
     async function loadDrafts() {
       if (!currentUsername) {
         drafts = [];
@@ -3163,7 +3181,7 @@
         const all = await res.json();
         const sentSet = new Set(sentEmails.map(s => (s.email || '').toLowerCase().trim()));
         drafts = (all || []).filter(d => d.status !== 'sent' && !sentSet.has((d.to_email || '').toLowerCase().trim()));
-        renderDrafts();
+        sortAndRenderDrafts();
       } catch (e) {}
     }
 
@@ -3279,6 +3297,80 @@
           </div>
         `;
       }).join('');
+    }
+
+    async function clearAllDraftsPrompt() {
+      if (!currentUsername) {
+        toast('Please sign in first', 'warning');
+        openClerkAuth();
+        return;
+      }
+      if (!drafts || drafts.length === 0) {
+        toast('No drafts to clear', 'info');
+        return;
+      }
+      if (!confirm(`Are you sure you want to clear all ${drafts.length} generated drafts?`)) return;
+
+      const btn = document.getElementById('btn-clear-all-drafts');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Clearing...';
+      }
+
+      try {
+        const res = await apiFetch('/api/emails/clear', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          toast(`Cleared all drafts`, 'success');
+          drafts = [];
+          renderDrafts();
+          await loadDrafts();
+        } else {
+          toast(data.error || 'Failed to clear drafts', 'error');
+        }
+      } catch (err) {
+        toast('Error clearing drafts: ' + err.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `🗑 Clear All Drafts ( <span id="clear-drafts-count">${drafts.length}</span> )`;
+        }
+      }
+    }
+
+    async function deleteSingleDraft(email) {
+      if (!email) return;
+      if (!currentUsername) {
+        toast('Please sign in first', 'warning');
+        openClerkAuth();
+        return;
+      }
+      try {
+        const res = await apiFetch('/api/emails/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_email: email })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          toast(`Deleted draft for ${email}`, 'info');
+          drafts = drafts.filter(d => (d.to_email || '').toLowerCase().trim() !== email.toLowerCase().trim());
+          renderDrafts();
+          await loadDrafts();
+        } else {
+          toast(data.error || 'Failed to delete draft', 'error');
+        }
+      } catch (err) {
+        toast('Error deleting draft: ' + err.message, 'error');
+      }
+    }
+
+    async function regenerateDraft(idx) {
+      const d = drafts[idx];
+      if (!d || !d.to_email) return;
+      const card = document.getElementById(`draft-${idx}`);
+      const btn = card ? card.querySelector('.btn-light-gray') : null;
+      await draftForContact(d.to_email, btn);
     }
 
     async function quickTailorDraftSkills(idx, btn) {
