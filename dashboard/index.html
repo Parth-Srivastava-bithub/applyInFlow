@@ -1168,17 +1168,27 @@
     .controls-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      width: 100%;
     }
     .dropdown-group {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-size: 12.5px;
       color: #64748b;
       font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .controls-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      flex-shrink: 0;
+      white-space: nowrap;
     }
     .select-box {
       background: #ffffff;
@@ -1912,7 +1922,7 @@
             <div class="controls-row">
               <div class="dropdown-group">
                 <span>Model:</span>
-                <select id="ai-model-select" class="select-box" style="width: 230px;">
+                <select id="ai-model-select" class="select-box" style="width: 200px;">
                   <option value="qwen/qwen3.8-27b" selected>Groq: Qwen 3.8 27B (Default)</option>
                   <option value="openai/gpt-oss-120b">Groq: GPT OSS 120B</option>
                   <option value="groq/compound">Groq: Compound</option>
@@ -1922,7 +1932,7 @@
 
               <div class="dropdown-group">
                 <span>Count:</span>
-                <select id="apply-count" class="select-box" style="width: 140px;">
+                <select id="apply-count" class="select-box" style="width: 130px;">
                   <option value="10pct">10% of Pending</option>
                   <option value="20pct" selected>20% of Pending</option>
                   <option value="50pct">50% of Pending</option>
@@ -1932,18 +1942,18 @@
 
               <div class="dropdown-group">
                 <span>Filter:</span>
-                <select id="match-filter" class="select-box" style="width: 160px;">
+                <select id="match-filter" class="select-box" style="width: 145px;">
                   <option value="all" selected>All Pending Leads</option>
                   <option value="skip_gaps">⚡ Skip Exp Gaps</option>
                   <option value="strong_only">🟢 Strong Fits Only</option>
                 </select>
               </div>
 
-              <div style="display:flex; gap:8px;">
-                <button class="btn btn-red-soft btn-xs" id="btn-stop-drafts" onclick="stopDrafting()" style="display:none;">
+              <div class="controls-actions">
+                <button class="btn btn-red-soft btn-xs" id="btn-stop-drafts" onclick="stopDrafting()" style="display:none; white-space:nowrap;">
                   ⛔ Stop
                 </button>
-                <button class="btn btn-primary-blue" id="btn-gen-drafts" onclick="generateBatchDrafts()">
+                <button class="btn btn-primary-blue" id="btn-gen-drafts" onclick="generateBatchDrafts()" style="white-space:nowrap;">
                   ⚡ Generate Drafts
                 </button>
               </div>
