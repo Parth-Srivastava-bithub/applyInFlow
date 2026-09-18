@@ -2607,7 +2607,7 @@
     let isExtensionConnected = false;
 
     // Listen for events from AutoApply Chrome Extension bridge
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', async (event) => {
       if (!event.data || event.data.target !== 'autoapply-page') return;
       const { type } = event.data;
 
