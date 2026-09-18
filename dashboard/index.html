@@ -3197,6 +3197,11 @@
         const all = await res.json();
         const sentSet = new Set(sentEmails.map(s => (s.email || '').toLowerCase().trim()));
         drafts = (all || []).filter(d => d.status !== 'sent' && !sentSet.has((d.to_email || '').toLowerCase().trim()));
+        drafts.forEach(d => {
+          if (d.body) {
+            d.body = d.body.replace(/(https?:\/\/)?parthml\.in\b/g, 'https://parthml.in');
+          }
+        });
         sortAndRenderDrafts();
       } catch (e) {}
     }

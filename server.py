@@ -753,6 +753,8 @@ def get_emails():
                 has_changes = True
             continue
         d["to_name"] = resolve_contact_name(d.get("to_name"), em)
+        if d.get("body"):
+            d["body"] = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", d["body"])
         pending_drafts.append(d)
 
     # Dynamically verify missing_tags against current resume skills so false-missing tags turn green
@@ -1661,6 +1663,8 @@ def save_email():
     to_email = data.get("to_email", "")
     clean_email = to_email.lower().strip()
     data["to_name"] = resolve_contact_name(data.get("to_name"), clean_email)
+    if data.get("body"):
+        data["body"] = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", data["body"])
 
     idx = next((i for i, e in enumerate(emails) if (e.get("to_email") or "").lower().strip() == clean_email), None)
     if idx is not None:
