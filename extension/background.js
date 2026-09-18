@@ -4,10 +4,18 @@
  * Coordinates sequential LinkedIn scraping across queries and syncs discovered leads to AutoApply backend.
  */
 
+try {
+  importScripts('config.js');
+} catch (e) {}
+
+const defaultServer = (typeof AUTOAPPLY_CONFIG !== "undefined" && AUTOAPPLY_CONFIG.DEFAULT_SERVER_URL)
+  ? AUTOAPPLY_CONFIG.DEFAULT_SERVER_URL
+  : "http://localhost:5000";
+
 let currentJob = {
   isRunning: false,
   username: "",
-  serverUrl: "http://localhost:5000",
+  serverUrl: defaultServer,
   queries: [],
   currentQueryIndex: 0,
   maxPosts: 15,
@@ -16,6 +24,15 @@ let currentJob = {
   dashboardTabId: null,
   scrapeTabId: null
 };
+
+// Check if user previously connected to a dashboard URL
+try {
+  chrome.storage.local.get(['lastDashboardUrl'], (res) => {
+    if (res && res.lastDashboardUrl) {
+      currentJob.serverUrl = res.lastDashboardUrl.replace(/\/$/, "");
+    }
+  });
+} catch (e) {}
 
 function getLinkedInSearchUrl(query) {
   const encoded = encodeURIComponent(query);

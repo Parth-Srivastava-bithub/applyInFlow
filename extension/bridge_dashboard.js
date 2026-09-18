@@ -11,6 +11,11 @@ function notifyPageReady() {
     type: "EXTENSION_READY",
     version: "1.0.0"
   }, "*");
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ lastDashboardUrl: window.location.origin });
+    }
+  } catch (e) {}
 }
 
 // Notify immediately and on DOMContentLoaded

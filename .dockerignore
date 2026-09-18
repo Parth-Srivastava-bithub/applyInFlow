@@ -5,6 +5,7 @@ __pycache__
 *.pyd
 .git
 .gitignore
+.env
 .env.example
 .chrome-playwright-session
 chrome_profile
@@ -13,3 +14,4 @@ node_modules
 .system_generated
 *.log
 scratch
+*.zip

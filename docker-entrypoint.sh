@@ -8,12 +8,11 @@ echo "=================================================="
 # Ensure directories exist
 mkdir -p /app/output/resumes
 
-export HOST="0.0.0.0"
-export PORT="5000"
+export HOST="${HOST:-0.0.0.0}"
+export PORT="${PORT:-5000}"
 
 echo "=================================================="
-echo "  AutoApply Dashboard : http://localhost:5000"
-echo "  LaTeX Microservice  : http://localhost:8001"
+echo "  AutoApply Dashboard : http://${HOST}:${PORT}"
 echo "  Scraping Engine     : Chrome Extension Client"
 echo "=================================================="
 
