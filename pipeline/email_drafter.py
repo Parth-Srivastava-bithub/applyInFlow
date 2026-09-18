@@ -133,6 +133,10 @@ def _parse_subject_body(raw: str) -> tuple[str, str]:
     if not clean:
         clean = raw
 
+    # Normalize fancy unicode punctuation to prevent email encoding glitches
+    clean = clean.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+    clean = clean.replace("\u2014", " -- ").replace("\u2013", " - ")
+
     subject, body = "", clean
     lines = clean.split("\n")
 
@@ -159,6 +163,7 @@ def draft_email(
     cand_name: str,
     model: str | None = None,
     api_key: str | None = None,
+    portfolio_url: str = "parthml.in",
 ) -> Dict[str, str]:
     """
     Draft a cold email from the candidate to a specific HR contact.
@@ -172,6 +177,7 @@ def draft_email(
         cand_name:          Candidate's display name (e.g. "Parth Srivastava").
         model:              LLM model identifier. Defaults to GROQ_MODEL env var.
         api_key:            Optional API key (Groq or OpenAI) for the user.
+        portfolio_url:      Candidate's portfolio link (e.g. "parthml.in").
 
     Returns:
         dict with keys: "subject" (str), "body" (str), "raw" (str)
@@ -186,12 +192,17 @@ def draft_email(
     if hr_name and hr_name not in ("Unknown", "Hiring Manager", "LinkedIn Recruiter"):
         first_name = hr_name.split()[0].strip()
 
+    # Clean portfolio URL display
+    clean_portfolio = (portfolio_url or "parthml.in").strip()
+    clean_portfolio_display = re.sub(r"^https?://", "", clean_portfolio).rstrip("/")
+
     # Load and render system prompt from prompts/email_draft.txt
     template_src = _load_prompt()
     system_prompt = Template(template_src).safe_substitute(
         cand_name=cand_name,
         first_name=first_name,
         candidate_context=candidate_context,
+        portfolio_url=clean_portfolio_display,
     )
 
     # Clean post text
@@ -217,6 +228,16 @@ def draft_email(
 
     raw = _call_api(messages, use_model, api_key=api_key)
     subject, body = _parse_subject_body(raw)
+
+    # Strip markdown bolding from email body to keep it authentic
+    body = re.sub(r"\*\*([^*]+)\*\*", r"\1", body)
+
+    # Guarantee portfolio link appears in sign-off if omitted by model
+    if clean_portfolio_display and clean_portfolio_display.lower() not in body.lower():
+        if cand_name in body:
+            body = re.sub(re.escape(cand_name), f"{cand_name}\n{clean_portfolio_display}", body, count=1)
+        else:
+            body = body.rstrip() + f"\n\nBest,\n{cand_name}\n{clean_portfolio_display}"
 
     logger.debug(f"Drafted email for {hr_email}: subject='{subject[:60]}...'")
 

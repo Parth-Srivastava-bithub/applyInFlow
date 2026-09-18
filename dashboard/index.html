@@ -1688,13 +1688,15 @@
             Make sure to use an <strong>alternate LinkedIn account</strong> in Chrome for scraping to keep your primary personal profile 100% safe.
           </p>
         </div>
-        <div class="sidebar-user-pill" onclick="openSettings()" title="Candidate Profile & Settings">
-          <div class="user-avatar-circle" id="sidebar-user-avatar">👤</div>
-          <div class="user-info-text">
-            <div class="user-name" id="sidebar-user-name">Guest (Not Signed In)</div>
-            <div class="user-email" id="sidebar-user-email">Sign in to save leads</div>
+        <div class="sidebar-user-pill" style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px;">
+          <div style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1;" onclick="handleSidebarUserClick()" title="Profile & Account">
+            <div class="user-avatar-circle" id="sidebar-user-avatar">👤</div>
+            <div class="user-info-text">
+              <div class="user-name" id="sidebar-user-name">Guest (Not Signed In)</div>
+              <div class="user-email" id="sidebar-user-email">Sign in to save leads</div>
+            </div>
           </div>
-          <span style="color: #94a3b8; font-size: 11px;">›</span>
+          <button id="sidebar-signout-btn" onclick="signOutUser()" title="Sign Out" style="display:none; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; padding:3px 6px; border-radius:6px;">🚪</button>
         </div>
       </div>
     </aside>
@@ -1725,8 +1727,12 @@
             <button class="btn btn-primary-blue btn-xs" id="clerk-signin-btn" onclick="openClerkAuth()" style="display:inline-flex; align-items:center; gap:5px;">
               <span>🔐</span> Sign In
             </button>
+            <div id="user-session-pill" style="display:none; align-items:center; gap:6px; background:var(--card-bg); border:1px solid var(--card-border); padding:3px 8px; border-radius:8px;">
+              <span id="header-user-badge" style="font-size:12px; font-weight:700; color:var(--text-main);"></span>
+              <button onclick="signOutUser()" title="Sign Out" style="background:none; border:none; cursor:pointer; font-size:12px; color:var(--text-muted); padding:1px 3px;">🚪</button>
+            </div>
           </div>
-          <div class="user-avatar-circle" id="user-avatar-circle" onclick="openSettings()" title="User Profile" style="cursor:pointer; background:#1e293b;">👤</div>
+          <div class="user-avatar-circle" id="user-avatar-circle" onclick="handleUserAvatarClick()" title="User Profile" style="cursor:pointer; background:#1e293b;">👤</div>
         </div>
       </header>
 
@@ -2013,6 +2019,50 @@
     </main>
   </div>
 
+  <!-- Direct Sign In Modal (Instant + Offline / Brave Compatible) -->
+  <div class="modal-backdrop" id="signin-modal" style="display:none;">
+    <div class="modal" style="max-width:420px; width:90%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="font-size:17px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+          <span>🔐</span> Sign In to AutoApply
+        </h3>
+        <button style="background:none; border:none; font-size:18px; color:var(--text-muted); cursor:pointer;" onclick="closeSignInModal()">✕</button>
+      </div>
+
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.5;">
+        Sign in to save your discovered recruiter leads, manage cold email drafts, and access your personal resume settings.
+      </div>
+
+      <!-- Quick 1-Click Sign In for Owner -->
+      <button class="btn btn-primary-blue" onclick="quickSignIn('yellowforesty', 'Parth Srivastava', 'parthsrivastava6112004@gmail.com')" style="width:100%; padding:10px; margin-bottom:14px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px; border-radius:8px;">
+        <span>⚡</span> Continue as Parth (yellowforesty)
+      </button>
+
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+        <div style="flex:1; height:1px; background:var(--card-border);"></div>
+        <span style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600;">or enter username</span>
+        <div style="flex:1; height:1px; background:var(--card-border);"></div>
+      </div>
+
+      <form onsubmit="handleManualSignIn(event)">
+        <div style="margin-bottom:14px;">
+          <label style="display:block; font-size:12px; font-weight:600; color:var(--text-main); margin-bottom:5px;">Username or Gmail</label>
+          <input id="signin-username-input" class="form-input" style="width:100%; font-size:13px;" placeholder="e.g. yellowforesty or parthsrivastava6112004@gmail.com" required />
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button type="button" class="btn btn-light-gray btn-sm" onclick="closeSignInModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary-blue btn-sm" style="font-weight:700;">Sign In →</button>
+        </div>
+      </form>
+
+      <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--card-border); text-align:center;">
+        <button type="button" onclick="tryClerkSignIn()" style="background:none; border:none; color:var(--accent-blue); font-size:12px; cursor:pointer; font-weight:600;">
+          Prefer Clerk Sign In? Click here
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings Modal -->
   <div class="modal-backdrop" id="settings-modal">
     <div class="modal">
@@ -2227,17 +2277,174 @@
       document.getElementById('resume-file').click();
     }
 
+    function handleSidebarUserClick() {
+      if (!currentUsername) {
+        openClerkAuth();
+      } else {
+        openSettings();
+      }
+    }
+
+    function handleUserAvatarClick() {
+      if (!currentUsername) {
+        openClerkAuth();
+      } else {
+        openSettings();
+      }
+    }
+
+    function openClerkAuth() {
+      // If Clerk is available and loaded, try opening it
+      if (window.Clerk && window.Clerk.loaded) {
+        try {
+          window.Clerk.openSignIn();
+          return;
+        } catch (e) {
+          console.warn('Clerk openSignIn failed, falling back to signin modal:', e);
+        }
+      }
+      // Direct fast fallback modal (works 100% in Brave, offline, or when Clerk CDN is blocked)
+      openSignInModal();
+    }
+
+    function openSignInModal() {
+      const modal = document.getElementById('signin-modal');
+      if (modal) modal.style.display = 'flex';
+      const inp = document.getElementById('signin-username-input');
+      if (inp) {
+        inp.value = localStorage.getItem('autoapply_user') || 'yellowforesty';
+        setTimeout(() => inp.focus(), 50);
+      }
+    }
+
+    function closeSignInModal() {
+      const modal = document.getElementById('signin-modal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function quickSignIn(username, displayName, email) {
+      applyUserSession(username, displayName, email);
+      closeSignInModal();
+    }
+
+    function handleManualSignIn(e) {
+      if (e) e.preventDefault();
+      const inp = document.getElementById('signin-username-input');
+      const val = inp ? inp.value.trim() : '';
+      if (!val) return;
+      applyUserSession(val, val, val.includes('@') ? val : '');
+      closeSignInModal();
+    }
+
+    function tryClerkSignIn() {
+      if (window.Clerk) {
+        try {
+          window.Clerk.openSignIn();
+          closeSignInModal();
+          return;
+        } catch (e) {
+          toast('Clerk SSO was blocked by browser shields. Use direct sign-in above.', 'warning');
+        }
+      } else {
+        toast('Clerk SSO was blocked by browser shields (Brave). Use direct sign-in above.', 'warning');
+      }
+    }
+
+    async function applyUserSession(username, displayName, email) {
+      if (!username) return;
+      currentUsername = username;
+      localStorage.setItem('autoapply_user', currentUsername);
+
+      const signinBtn = document.getElementById('clerk-signin-btn');
+      const authGate = document.getElementById('clerk-auth-gate');
+      const avatarFallback = document.getElementById('user-avatar-circle');
+      const sessionPill = document.getElementById('user-session-pill');
+      const headerUserBadge = document.getElementById('header-user-badge');
+      const sidebarSignoutBtn = document.getElementById('sidebar-signout-btn');
+
+      if (signinBtn) signinBtn.style.display = 'none';
+      if (authGate) authGate.style.display = 'none';
+      if (avatarFallback) avatarFallback.style.display = 'none';
+      if (sessionPill) sessionPill.style.display = 'inline-flex';
+      if (sidebarSignoutBtn) sidebarSignoutBtn.style.display = 'inline-block';
+
+      const dName = displayName || username;
+      if (headerUserBadge) headerUserBadge.textContent = dName;
+
+      const sidebarNameEl = document.getElementById('sidebar-user-name');
+      if (sidebarNameEl) sidebarNameEl.textContent = dName;
+      const sidebarEmailEl = document.getElementById('sidebar-user-email');
+      if (sidebarEmailEl) sidebarEmailEl.textContent = email || (username.includes('@') ? username : `${username}@autoapply`);
+      const avatarEl = document.getElementById('sidebar-user-avatar');
+      if (avatarEl) avatarEl.textContent = (dName[0] || 'U').toUpperCase();
+
+      toast(`Signed in as ${dName}`, 'success');
+
+      await loadProfile();
+      await checkDbStatus();
+      await loadContacts();
+      await loadDrafts();
+    }
+
+    function signOutUser() {
+      currentUsername = null;
+      localStorage.removeItem('autoapply_user');
+      contacts = [];
+      sentEmails = [];
+      drafts = [];
+      profile = {};
+
+      const signinBtn = document.getElementById('clerk-signin-btn');
+      const authGate = document.getElementById('clerk-auth-gate');
+      const userSlot = document.getElementById('clerk-user-button');
+      const avatarFallback = document.getElementById('user-avatar-circle');
+      const sessionPill = document.getElementById('user-session-pill');
+      const sidebarSignoutBtn = document.getElementById('sidebar-signout-btn');
+
+      if (signinBtn) signinBtn.style.display = 'inline-flex';
+      if (authGate) authGate.style.display = 'flex';
+      if (userSlot) userSlot.style.display = 'none';
+      if (avatarFallback) avatarFallback.style.display = 'inline-flex';
+      if (sessionPill) sessionPill.style.display = 'none';
+      if (sidebarSignoutBtn) sidebarSignoutBtn.style.display = 'none';
+
+      const sidebarNameEl = document.getElementById('sidebar-user-name');
+      if (sidebarNameEl) sidebarNameEl.textContent = 'Guest (Not Signed In)';
+      const sidebarEmailEl = document.getElementById('sidebar-user-email');
+      if (sidebarEmailEl) sidebarEmailEl.textContent = 'Sign in to save leads';
+      const avatarEl = document.getElementById('sidebar-user-avatar');
+      if (avatarEl) avatarEl.textContent = '👤';
+
+      if (window.Clerk && window.Clerk.signOut) {
+        try { window.Clerk.signOut(); } catch(e) {}
+      }
+
+      renderLockedState();
+      toast('Signed out successfully', 'info');
+    }
+
     async function init() {
       initTheme();
       initKeyboardShortcuts();
       renderSearchValues();
-      renderLockedState();
+
+      // Check if user was previously signed in via localStorage
+      const savedUser = localStorage.getItem('autoapply_user');
+      if (savedUser && savedUser !== 'null' && savedUser !== 'undefined' && savedUser.trim()) {
+        const isOwner = ['yellowforesty', 'parth', 'parthsrivastava', 'parthsrivastava6112004_gmail_com'].includes(savedUser.toLowerCase());
+        const dName = isOwner ? 'Parth Srivastava' : savedUser;
+        const sEmail = isOwner ? 'parthsrivastava6112004@gmail.com' : (savedUser.includes('@') ? savedUser : '');
+        await applyUserSession(savedUser, dName, sEmail);
+      } else {
+        renderLockedState();
+      }
+
       await initClerk();
     }
 
     async function waitForClerk() {
       if (window.Clerk) return window.Clerk;
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 25; i++) {
         await new Promise(r => setTimeout(r, 100));
         if (window.Clerk) return window.Clerk;
       }
@@ -2261,12 +2468,9 @@
           async function syncUserState(user) {
             if (user) {
               const rawUser = user.username || (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || 'user';
-              currentUsername = rawUser;
-              localStorage.setItem('autoapply_user', currentUsername);
-
-              if (signinBtn) signinBtn.style.display = 'none';
-              if (authGate) authGate.style.display = 'none';
-              if (avatarFallback) avatarFallback.style.display = 'none';
+              const dName = user.fullName || user.firstName || rawUser;
+              const sEmail = (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || '';
+              await applyUserSession(rawUser, dName, sEmail);
 
               if (userSlot) {
                 userSlot.style.display = 'inline-block';
@@ -2274,75 +2478,21 @@
                   afterSignOutUrl: window.location.href,
                 });
               }
-
-              // Sidebar display
-              const displayName = user.fullName || user.firstName || currentUsername;
-              const sidebarNameEl = document.getElementById('sidebar-user-name');
-              if (sidebarNameEl) sidebarNameEl.textContent = displayName;
-              const sidebarEmailEl = document.getElementById('sidebar-user-email');
-              if (sidebarEmailEl && user.primaryEmailAddress) {
-                sidebarEmailEl.textContent = user.primaryEmailAddress.emailAddress;
-              }
-              const avatarEl = document.getElementById('sidebar-user-avatar');
-              if (avatarEl) avatarEl.textContent = (displayName[0] || 'U').toUpperCase();
-
-              await loadProfile();
-              await checkDbStatus();
-              await loadContacts();
-              await loadDrafts();
-            } else {
-              // Signed out: strictly wipe state and lock all private views
-              currentUsername = null;
-              localStorage.removeItem('autoapply_user');
-              contacts = [];
-              sentEmails = [];
-              drafts = [];
-              profile = {};
-
-              if (signinBtn) signinBtn.style.display = 'inline-flex';
-              if (authGate) authGate.style.display = 'flex';
-              if (userSlot) userSlot.style.display = 'none';
-              if (avatarFallback) avatarFallback.style.display = 'inline-flex';
-
-              const sidebarNameEl = document.getElementById('sidebar-user-name');
-              if (sidebarNameEl) sidebarNameEl.textContent = 'Guest (Not Signed In)';
-              const sidebarEmailEl = document.getElementById('sidebar-user-email');
-              if (sidebarEmailEl) sidebarEmailEl.textContent = 'Sign in to save leads';
-              const avatarEl = document.getElementById('sidebar-user-avatar');
-              if (avatarEl) avatarEl.textContent = '👤';
-
-              renderLockedState();
             }
           }
 
           clerk.addListener(async ({ user }) => {
-            await syncUserState(user);
+            if (user) {
+              await syncUserState(user);
+            }
           });
 
-          await syncUserState(clerk.user);
-        } else {
-          console.warn('Clerk SDK was not reachable or blocked by network.');
-          if (signinBtn) signinBtn.style.display = 'inline-flex';
-          if (authGate) authGate.style.display = 'flex';
-          renderLockedState();
+          if (clerk.user) {
+            await syncUserState(clerk.user);
+          }
         }
       } catch (err) {
-        console.warn('Clerk initialization error:', err);
-        if (signinBtn) signinBtn.style.display = 'inline-flex';
-        if (authGate) authGate.style.display = 'flex';
-        renderLockedState();
-      }
-    }
-
-    function openClerkAuth() {
-      if (window.Clerk) {
-        try {
-          window.Clerk.openSignIn();
-        } catch (e) {
-          console.error(e);
-        }
-      } else {
-        toast('Authentication is still initializing, please wait a moment...', 'info');
+        console.warn('Clerk background init notice:', err);
       }
     }
 

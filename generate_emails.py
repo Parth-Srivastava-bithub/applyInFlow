@@ -32,16 +32,21 @@ OUTPUT_JSON = Path("output/cold_emails.json")
 
 # ── YOUR PROFILE ── edit this to match your background ──────────────────────
 CANDIDATE_PROFILE = """
-Name: [Your Name]
-Role: AI/ML Engineer
-Experience: 2+ years building ML pipelines, LLM apps, RAG systems
-Skills: Python, PyTorch, TensorFlow, LangChain, FastAPI, Docker, AWS
-Education: B.Tech / B.E. in Computer Science (or related)
-Location: India (open to remote / hybrid / relocation)
-LinkedIn: [Your LinkedIn URL]
-Phone: [Your Phone]
+Candidate Profile:
+- Name: Parth Srivastava
+- Target Role: AI/ML Engineer
+- Experience: 1+ years hands-on production experience
+- Portfolio / Website: parthml.in
+- Key Skills: Python, LangChain, LangGraph, RAG, AI Agents, LLM Fine-Tuning, QLoRA, PEFT, vLLM, FastAPI, Docker, RunPod, AWS, Apache Airflow, Prometheus, Locust
+- Notable Projects:
+  * Modeva: Multi-cloud GPU orchestrator managing live compute instances across RunPod & Novita with SSE streaming and AES-256-GCM encryption.
+  * Real-Time Synchronized RAG: Dynamic document lifecycle (instant ingestion/deletion) with LangGraph decision trees.
+  * Qwen2.5 Fine-Tuning: End-to-end QLoRA on RunPod GPUs with custom tokenization/label masking, served via vLLM inference API.
+  * Apache Airflow Lakehouse: Bronze/Silver/Gold ETL pipeline processing 10K+ records/day.
+- Location: India (Open to Remote / Hybrid / Immediate Joiner)
+- Contact: parthsrivastava6112004@gmail.com | +91 8887664156 | https://linkedin.com/in/parth-srivastava-dsuser/
 """
-CANDIDATE_NAME = "[Your Name]"
+CANDIDATE_NAME = "Parth Srivastava"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
