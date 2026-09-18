@@ -1193,7 +1193,7 @@ def generate_email():
         from pipeline.email_drafter import draft_email as _draft_email
         is_openai = any(req_model.startswith(p) for p in ("gpt-", "o1", "o3", "chatgpt"))
         user_api_key = (profile.get("openai_api_key") if is_openai else profile.get("groq_api_key")) or ""
-        portfolio_url = profile.get("portfolio_url") or profile.get("website") or "parthml.in"
+        portfolio_url = profile.get("portfolio_url") or profile.get("website") or "https://parthml.in"
         draft = _draft_email(
             hr_name=hr_name,
             hr_title=hr_title,

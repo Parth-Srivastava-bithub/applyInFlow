@@ -318,13 +318,13 @@ def format_candidate_context_for_prompt(profile: StructuredResumeProfile) -> str
     skills_str = ", ".join(profile.key_skills) if profile.key_skills else "AI, Machine Learning, Python"
     projects_str = "\n".join([f"- {p}" for p in profile.key_projects_or_achievements]) if profile.key_projects_or_achievements else "N/A"
 
-    portfolio = "parthml.in"
+    portfolio = "https://parthml.in"
     for lk in (profile.links or []):
         if "parthml" in lk:
-            portfolio = "parthml.in"
+            portfolio = "https://parthml.in"
             break
         elif "portfolio" in lk or "github" in lk:
-            portfolio = lk
+            portfolio = lk if lk.startswith("http") else f"https://{lk}"
 
     ctx = f"""Candidate Profile (Extracted from Resume):
 - Name: {profile.name}

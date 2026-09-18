@@ -36,7 +36,7 @@ Candidate Profile:
 - Name: Parth Srivastava
 - Target Role: AI/ML Engineer
 - Experience: 1+ years hands-on production experience
-- Portfolio / Website: parthml.in
+- Portfolio / Website: https://parthml.in
 - Key Skills: Python, LangChain, LangGraph, RAG, AI Agents, LLM Fine-Tuning, QLoRA, PEFT, vLLM, FastAPI, Docker, RunPod, AWS, Apache Airflow, Prometheus, Locust
 - Notable Projects:
   * Modeva: Multi-cloud GPU orchestrator managing live compute instances across RunPod & Novita with SSE streaming and AES-256-GCM encryption.

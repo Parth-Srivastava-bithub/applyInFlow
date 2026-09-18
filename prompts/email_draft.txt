@@ -35,7 +35,7 @@ CRITICAL RULES TO WRITE A 100% HUMAN, AUTHENTIC, HIGH-CONVERTING COLD EMAIL:
    - Low-friction ask: "Resume attached — are you open to a brief 10-minute sync this Thursday or Friday?"
 
 6. SIGN-OFF:
-   - Sign off cleanly with your name and portfolio URL:
+   - Sign off cleanly with your name and full clickable portfolio link (must start with https://):
 Best,
 $cand_name
 $portfolio_url

@@ -163,7 +163,7 @@ def draft_email(
     cand_name: str,
     model: str | None = None,
     api_key: str | None = None,
-    portfolio_url: str = "parthml.in",
+    portfolio_url: str = "https://parthml.in",
 ) -> Dict[str, str]:
     """
     Draft a cold email from the candidate to a specific HR contact.
@@ -177,7 +177,7 @@ def draft_email(
         cand_name:          Candidate's display name (e.g. "Parth Srivastava").
         model:              LLM model identifier. Defaults to GROQ_MODEL env var.
         api_key:            Optional API key (Groq or OpenAI) for the user.
-        portfolio_url:      Candidate's portfolio link (e.g. "parthml.in").
+        portfolio_url:      Candidate's portfolio link (e.g. "https://parthml.in").
 
     Returns:
         dict with keys: "subject" (str), "body" (str), "raw" (str)
@@ -192,9 +192,12 @@ def draft_email(
     if hr_name and hr_name not in ("Unknown", "Hiring Manager", "LinkedIn Recruiter"):
         first_name = hr_name.split()[0].strip()
 
-    # Clean portfolio URL display
-    clean_portfolio = (portfolio_url or "parthml.in").strip()
-    clean_portfolio_display = re.sub(r"^https?://", "", clean_portfolio).rstrip("/")
+    # Clean portfolio URL display: ensure full https:// so email clients make it clickable
+    raw_portfolio = (portfolio_url or "https://parthml.in").strip()
+    if not raw_portfolio.startswith("http://") and not raw_portfolio.startswith("https://"):
+        clean_portfolio_display = f"https://{raw_portfolio}".rstrip("/")
+    else:
+        clean_portfolio_display = raw_portfolio.rstrip("/")
 
     # Load and render system prompt from prompts/email_draft.txt
     template_src = _load_prompt()
@@ -231,6 +234,9 @@ def draft_email(
 
     # Strip markdown bolding from email body to keep it authentic
     body = re.sub(r"\*\*([^*]+)\*\*", r"\1", body)
+
+    # Upgrade any naked domain like 'parthml.in' into clickable 'https://parthml.in'
+    body = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", body)
 
     # Guarantee portfolio link appears in sign-off if omitted by model
     if clean_portfolio_display and clean_portfolio_display.lower() not in body.lower():
