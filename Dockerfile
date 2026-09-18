@@ -22,9 +22,6 @@ COPY . .
 # Ensure entrypoint is executable if present
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Volume for persistent output (contacts, emails, user data)
-VOLUME ["/app/output"]
-
 # Expose AutoApply Dashboard Web UI port
 EXPOSE 5000
 
