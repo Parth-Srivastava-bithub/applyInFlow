@@ -3208,10 +3208,14 @@
 
     function renderDrafts() {
       const container = document.getElementById('drafts-container');
+      const tailorCountEl = document.getElementById('tailor-all-count');
+      const clearCountEl = document.getElementById('clear-drafts-count');
+      const applyCountEl = document.getElementById('apply-all-count');
+
       if (!currentUsername) {
-        document.getElementById('tailor-all-count').textContent = '0';
-        document.getElementById('clear-drafts-count').textContent = '0';
-        document.getElementById('apply-all-count').textContent = '0';
+        if (tailorCountEl) tailorCountEl.textContent = '0';
+        if (clearCountEl) clearCountEl.textContent = '0';
+        if (applyCountEl) applyCountEl.textContent = '0';
         container.innerHTML = `
           <div style="text-align:center; padding:60px 20px; border:2px dashed var(--card-border); border-radius:12px; margin-top:16px;">
             <div style="font-size:36px; margin-bottom:12px;">🔒</div>
@@ -3226,9 +3230,9 @@
         `;
         return;
       }
-      document.getElementById('tailor-all-count').textContent = drafts.length;
-      document.getElementById('clear-drafts-count').textContent = drafts.length;
-      document.getElementById('apply-all-count').textContent = drafts.length;
+      if (tailorCountEl) tailorCountEl.textContent = drafts.length;
+      if (clearCountEl) clearCountEl.textContent = drafts.length;
+      if (applyCountEl) applyCountEl.textContent = drafts.length;
 
       if (!drafts.length) {
         container.innerHTML = `
@@ -3333,10 +3337,7 @@
       if (!confirm(`Are you sure you want to clear all ${drafts.length} generated drafts?`)) return;
 
       const btn = document.getElementById('btn-clear-all-drafts');
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Clearing...';
-      }
+      if (btn) btn.disabled = true;
 
       try {
         const res = await apiFetch('/api/emails/clear', { method: 'POST' });
@@ -3352,10 +3353,7 @@
       } catch (err) {
         toast('Error clearing drafts: ' + err.message, 'error');
       } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = `🗑 Clear All Drafts ( <span id="clear-drafts-count">${drafts.length}</span> )`;
-        }
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -3632,6 +3630,16 @@
       }
     }
 
+    function stopDrafting() {
+      stopDraftingRequested = true;
+      const stopBtn = document.getElementById('btn-stop-drafts');
+      if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.textContent = 'Stopping...';
+      }
+      toast('Stopping drafting after current email...', 'info');
+    }
+
     async function generateBatchDrafts() {
       if (!currentUsername) {
         toast('Please sign in first to generate drafts', 'warning');
@@ -3648,44 +3656,72 @@
 
       const target = unapplied.slice(0, limit);
       const btn = document.getElementById('btn-gen-drafts');
-      btn.disabled = true;
+      const stopBtn = document.getElementById('btn-stop-drafts');
 
-      for (let i = 0; i < target.length; i++) {
-        const c = target[i];
-        btn.textContent = `⚡ Drafting ${i + 1}/${target.length}...`;
-        try {
-          const res = await apiFetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: c.name,
-              title: c.title,
-              post_text: c.post_text,
-              hr_email: c.email || c.hr_email,
-              model: document.getElementById('ai-model-select').value
-            })
-          });
-          const data = await res.json();
-          if (data.body) {
-            await apiFetch('/api/save-email', {
+      stopDraftingRequested = false;
+      if (btn) btn.disabled = true;
+      if (stopBtn) {
+        stopBtn.disabled = false;
+        stopBtn.textContent = '⛔ Stop';
+        stopBtn.style.display = 'inline-flex';
+      }
+
+      let generatedCount = 0;
+
+      try {
+        for (let i = 0; i < target.length; i++) {
+          if (stopDraftingRequested) {
+            toast(`Drafting stopped by user. Created ${generatedCount} drafts.`, 'info');
+            break;
+          }
+
+          const c = target[i];
+          if (btn) btn.textContent = `⚡ Drafting ${i + 1}/${target.length}...`;
+          try {
+            const res = await apiFetch('/api/generate', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                to_email: c.email || c.hr_email,
-                to_name: data.resolved_name || c.name,
-                subject: data.subject,
-                body: data.body,
-                status: 'draft',
-                fit: data.fit || null
+                name: c.name,
+                title: c.title,
+                post_text: c.post_text,
+                hr_email: c.email || c.hr_email,
+                model: document.getElementById('ai-model-select').value
               })
             });
-            await loadDrafts();
-          }
-        } catch (e) {}
+            const data = await res.json();
+            if (data.body) {
+              await apiFetch('/api/save-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  to_email: c.email || c.hr_email,
+                  to_name: data.resolved_name || c.name,
+                  subject: data.subject,
+                  body: data.body,
+                  status: 'draft',
+                  fit: data.fit || null
+                })
+              });
+              generatedCount++;
+              await loadDrafts();
+            }
+          } catch (e) {}
+        }
+        if (!stopDraftingRequested) {
+          toast(`Generated ${generatedCount} drafts!`, 'success');
+        }
+      } finally {
+        if (stopBtn) {
+          stopBtn.disabled = false;
+          stopBtn.textContent = '⛔ Stop';
+          stopBtn.style.display = 'none';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '⚡ Generate Drafts';
+        }
       }
-      btn.disabled = false;
-      btn.textContent = '⚡ Generate Drafts';
-      toast(`Generated ${target.length} drafts!`, 'success');
     }
 
     async function applyToAll() {
