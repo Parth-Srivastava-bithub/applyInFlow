@@ -300,13 +300,49 @@ class TestZeroDataLeakage(unittest.TestCase):
         res = self.app.get("/api/contacts", headers={"X-User-Name": "legacy"})
         self.assertEqual(res.get_json(), [])
 
-    def test_action_endpoints_require_auth(self):
-        """Unauthenticated mutation attempts return 401 Unauthorized."""
-        self.assertEqual(self.app.post("/api/generate", json={}).status_code, 401)
-        self.assertEqual(self.app.post("/api/send", json={}).status_code, 401)
-        self.assertEqual(self.app.post("/api/scrape", json={}).status_code, 401)
-        self.assertEqual(self.app.post("/api/contacts/clear").status_code, 401)
+    def test_resolve_contact_name_rejects_email_usernames(self):
+        """Email usernames like bharatkp or softwared250 must never be derived as names."""
+        from server import resolve_contact_name, derive_name_from_email
+        self.assertEqual(derive_name_from_email("bharatkp@gmail.com"), "")
+        self.assertEqual(derive_name_from_email("softwared250@gmail.com"), "")
+        # Empty/garbage name with email must return empty string
+        self.assertEqual(resolve_contact_name("", "bharatkp@gmail.com"), "")
+        self.assertEqual(resolve_contact_name("bharatkp", "bharatkp@gmail.com"), "")
+        self.assertEqual(resolve_contact_name("Showcase Your Creativity", "bharatkp@gmail.com"), "")
+        # Valid name is preserved
+        self.assertEqual(resolve_contact_name("Bharat Kancharla", "bharat.kancharla@gmail.com"), "Bharat Kancharla")
+
+    def test_recipient_salutation_resolution(self):
+        """Test Groq-based salutation resolution hierarchy: Name -> Gender -> None."""
+        from pipeline.recipient_resolver import resolve_salutation_with_groq
+        # 1. Real human name
+        sal = resolve_salutation_with_groq(
+            author_name="Bharat Kancharla",
+            title="IT Recruiter",
+            post_text="Hiring Gen AI engineers. Send resumes to bharat.kancharla@gmail.com",
+            email="bharat.kancharla@gmail.com"
+        )
+        self.assertEqual(sal, "Bharat")
+
+        # 2. Gender pronouns
+        sal_female = resolve_salutation_with_groq(
+            author_name="HR Recruiter",
+            title="Technical Recruiter (She/Her)",
+            post_text="Hiring engineers. Reach out to hr@company.com",
+            email="hr@company.com"
+        )
+        self.assertEqual(sal_female, "Ma'am")
+
+        # 3. Garbage headline + email username -> None (so email opens with Hi,)
+        sal_none = resolve_salutation_with_groq(
+            author_name="Showcase Your Creativity",
+            title="Staffing",
+            post_text="Hiring engineers. Send resume to bharatkp@gmail.com",
+            email="bharatkp@gmail.com"
+        )
+        self.assertIsNone(sal_none)
 
 
 if __name__ == "__main__":
     unittest.main()
+

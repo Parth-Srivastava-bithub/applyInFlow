@@ -187,10 +187,21 @@ def draft_email(
     """
     use_model = model or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 
-    # Determine salutation first name
-    first_name = "there"
-    if hr_name and hr_name not in ("Unknown", "Hiring Manager", "LinkedIn Recruiter"):
-        first_name = hr_name.split()[0].strip()
+    # Determine recipient salutation via Groq: real name -> Sir/Ma'am -> None
+    from pipeline.recipient_resolver import resolve_salutation_with_groq
+    salutation = resolve_salutation_with_groq(
+        post_text=post_text,
+        author_name=hr_name,
+        email=hr_email,
+        title=hr_title,
+        api_key=api_key,
+        model=use_model,
+    )
+
+    if salutation:
+        greeting_line = f"Hi {salutation},"
+    else:
+        greeting_line = "Hi,"
 
     # Clean portfolio URL display: ensure full https:// so email clients make it clickable
     raw_portfolio = (portfolio_url or "https://parthml.in").strip()
@@ -203,7 +214,8 @@ def draft_email(
     template_src = _load_prompt()
     system_prompt = Template(template_src).safe_substitute(
         cand_name=cand_name,
-        first_name=first_name,
+        first_name=salutation or "there",
+        greeting_line=greeting_line,
         candidate_context=candidate_context,
         portfolio_url=clean_portfolio_display,
     )
@@ -215,11 +227,11 @@ def draft_email(
 
     user_msg = (
         f"Recipient Email: {hr_email}\n"
-        f"Recruiter Name: {hr_name}\n"
-        f"Recruiter Headline / Company: {hr_title}\n\n"
-        f"Relevant LinkedIn Post Content (about this specific recruiter):\n{cleaned_post}\n\n"
-        f"IMPORTANT: The email must start with 'Hi {first_name},' where {first_name} = "
-        "the recruiter's first name above. "
+        f"Recruiter / Author: {hr_name or 'Unknown'}\n"
+        f"Recruiter Headline / Company: {hr_title or ''}\n\n"
+        f"Relevant LinkedIn Post Content:\n{cleaned_post}\n\n"
+        f"IMPORTANT: The email must start with '{greeting_line}' exactly as written. "
+        "DO NOT invent or guess any name from the email address. "
         "DO NOT mention any other recruiter's name. Write only about the job details in the post above.\n\n"
         "Write the human, contextual cold email now."
     )
@@ -234,6 +246,15 @@ def draft_email(
 
     # Strip markdown bolding from email body to keep it authentic
     body = re.sub(r"\*\*([^*]+)\*\*", r"\1", body)
+
+    # Enforce exact greeting line on email opening
+    body = body.strip()
+    body = re.sub(r'^(?:Hi|Hello|Dear)\s+[^,\n]+,', greeting_line, body, count=1)
+    if not body.startswith(greeting_line):
+        if re.match(r'^(?:Hi|Hello),', body):
+            body = re.sub(r'^(?:Hi|Hello),', greeting_line, body, count=1)
+        else:
+            body = f"{greeting_line}\n\n{body}"
 
     # Upgrade any naked domain like 'parthml.in' into clickable 'https://parthml.in'
     body = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", body)
@@ -251,4 +272,5 @@ def draft_email(
         "subject": subject,
         "body": body,
         "raw": raw,
+        "salutation": salutation,
     }

@@ -400,14 +400,18 @@ GARBAGE_PATTERNS = [
     r'developer', r'engineer', r'software', r'cloud', r'cyber', r'defense',
     r'resume', r'whitepaper', r'report', r'share', r'connect', r'discuss',
     r'hello', r'weekly', r'insights', r'client', r'agentic', r'talent acquisition',
-    r'college', r'school', r'university', r'pvt ltd', r'limited', r'solutions pvt',
-    r'reach out', r'help someone', r'shape', r'more about', r'innovations'
+    r'college', r'school', r'university', r'pvt ltd', r'limited', r'solutions',
+    r'reach out', r'help someone', r'shape', r'more about', r'innovations',
+    r'showcase', r'creativity', r'practical', r'experience', r'interview',
+    r'post with', r'mutual time', r'eagerness', r'work directly', r'hiring team',
+    r'human resources', r'hiring manager', r'linkedin member', r'unknown'
 ]
 
 def is_garbage_name(name: str) -> bool:
-    if not name or len(name) < 2:
+    if not name or len(name) < 2 or len(name) > 35:
         return True
-    if len(name) > 30:
+    words = name.strip().split()
+    if len(words) > 4:
         return True
     n_lower = name.lower()
     for gp in GARBAGE_PATTERNS:
@@ -415,91 +419,30 @@ def is_garbage_name(name: str) -> bool:
             return True
     return False
 
-IGNORE_WORDS = {
-    'gmail', 'mail', 'email', 'hr', 'careers', 'career', 'carreirs', 'hiring', 'talent',
-    'jobs', 'job', 'tech', 'technologies', 'technology', 'soft', 'software', 'solutions',
-    'solution', 'services', 'service', 'systems', 'system', 'innovations', 'associate',
-    'associates', 'futurefirstp', 'futurefirst', 'firstjob', 'futuretech', 'recruit',
-    'recruiter', 'recruitment', 'hire', 'hired', 'hiring', 'consultancy', 'consulting',
-    'consultant', 'partners', 'partner', 'global', 'nsglobal', 'wikilabs', 'vectratek',
-    'sourceinfotech', 'mconvictionhr', 'lahzrtech', 'sinontechs', 'infowingsolutions',
-    'infowingsolu', 'oncorre', 'team', 'info', 'support', 'contact', 'admin', 'sales',
-    'corp', 'corporate', 'group', 'india', 'usa', 'llc', 'pvt', 'ltd', 'resilienceitsolutions',
-    'forcecraver', 'workwave', 'jamstacky', 'freelancer', 'direct', 'client', 'reach',
-    'new', 'requirementnew', 'requirement', 'cspecialist', 'brokers', 'sgcbrokers',
-    'tennaresilienceitsolutions', 'admission', 'college', 'engineering', 'risingcareer',
-    'thecorextech', 'mathisfunlike', 'weekly', 'insights', 'venturequest'
-}
-
-COMMON_NAMES = {
-    'yashi', 'harshith', 'bhargava', 'darakhshan', 'pratham', 'dharmraj', 'fenil', 'joy',
-    'sagar', 'neha', 'prasana', 'pragyasmita', 'aastha', 'bharath', 'sunny', 'rohini',
-    'aditya', 'amrutha', 'salman', 'hema', 'mahalakshmi', 'shaik', 'fshaik', 'basyam',
-    'joyce', 'rohith', 'vishal', 'vishu', 'abhishek', 'singh', 'oviya', 'clamont',
-    'yoshita', 'pratishruti', 'dharani', 'mathy', 'subha', 'kiran', 'ipseeta', 'deepika',
-    'tarun', 'abhiroop', 'abhik', 'keerthi', 'vivek', 'jashim', 'prachi', 'mohammad',
-    'huzaifa', 'faizan', 'swapnil', 'anindita', 'harvey', 'mansi', 'raunak', 'sandhya',
-    'srujani', 'srinidhi', 'devalla', 'katakam', 'jain', 'shahid', 'krish', 'sapkota',
-    'raghuvanshi', 'patro', 'sharma', 'maddipati', 'verma', 'bandar', 'singhal', 'dey',
-    'castro', 'nanda', 'marikanti', 'kumar', 'dixit', 'sana', 'zahoor'
-}
-
 def derive_name_from_email(email: str) -> str:
     """
-    Turns an email local-part into a clean human name.
+    Deprecated: Never guess or invent a human name by splitting email at '@'.
+    An email username could be anything and is not a name.
     """
-    if not email or '@' not in email:
-        return ''
-    local = email.split('@')[0].lower()
-    for p in ('mail.', 'cv.', 'resume.', 'hr.', 'careers.', 'career.', 'info.', 'contact.', 'get.hired.by.'):
-        if local.startswith(p):
-            local = local[len(p):]
-    local_clean = re.sub(r'[\._\-]\d+$', '', local)
-    local_clean = re.sub(r'\d+$', '', local_clean)
-    tokens = re.split(r'[\._\-]+', local_clean)
-    words = []
-    for t in tokens:
-        if not t or t in IGNORE_WORDS:
-            continue
-        subwords = re.findall(r'[A-Z][a-z]*|[a-z]+', t)
-        for sw in subwords:
-            matched = False
-            for cn in sorted(COMMON_NAMES, key=len, reverse=True):
-                if sw.startswith(cn):
-                    words.append(cn)
-                    rem = sw[len(cn):]
-                    if rem and rem not in IGNORE_WORDS:
-                        for cn2 in sorted(COMMON_NAMES, key=len, reverse=True):
-                            if rem.startswith(cn2):
-                                words.append(cn2)
-                                break
-                        else:
-                            if len(rem) >= 3 and rem not in IGNORE_WORDS:
-                                words.append(rem)
-                    matched = True
-                    break
-            if not matched and len(sw) >= 3 and sw not in IGNORE_WORDS:
-                words.append(sw)
-    final_words = [w.capitalize() for w in words if w.lower() not in IGNORE_WORDS and len(w) >= 2]
-    return ' '.join(final_words[:2]) if final_words else ''
+    return ''
 
-def resolve_contact_name(stored_name: str, email: str) -> str:
+def resolve_contact_name(stored_name: str, email: str = "") -> str:
     """
-    Reconciles stored contact/author name with the actual email address.
-    If stored name is junk, generic, company, or clearly belongs to a different person
-    than the email address, uses the derived email name.
+    Returns the real contact/author name if valid, or empty string if junk/headline/generic.
+    STRICT RULE: Never derives fake names from email address usernames.
     """
     stored = (stored_name or '').strip()
-    derived = derive_name_from_email(email)
-    if is_garbage_name(stored):
-        return derived or 'Hiring Manager'
-    if not derived:
-        return stored or 'Hiring Manager'
-    stored_first = re.sub(r'[^a-zA-Z]', '', stored.split()[0]).lower() if stored else ''
-    derived_first = re.sub(r'[^a-zA-Z]', '', derived.split()[0]).lower() if derived else ''
-    if stored_first and derived_first:
-        if stored_first != derived_first and not stored_first.startswith(derived_first) and not derived_first.startswith(stored_first):
-            return derived
+    if not stored or is_garbage_name(stored) or '@' in stored:
+        return ''
+    # If the stored name is just the email username (e.g. bharatkp, softwared250), reject it
+    if email and '@' in email:
+        local_part = email.split('@')[0].lower()
+        if re.sub(r'[\d._-]+', '', stored.lower()) == re.sub(r'[\d._-]+', '', local_part):
+            return ''
+    from pipeline.recipient_resolver import NON_HUMAN_NAMES
+    first_token = stored.split()[0].lower()
+    if first_token in NON_HUMAN_NAMES:
+        return ''
     return stored
 
 def groq_stream(messages: list, model: str = None, max_tokens: int = 4096, user_profile: dict = None) -> str:
@@ -1227,7 +1170,7 @@ def generate_email():
             "subject": subject,
             "body": body,
             "raw": result,
-            "resolved_name": hr_name,
+            "resolved_name": draft.get("salutation") or hr_name or "",
             "fit": fit_data
         })
     except Exception as e:

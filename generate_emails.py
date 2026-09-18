@@ -117,7 +117,7 @@ def main():
 
             results.append({
                 "to_email":    hr_email,
-                "to_name":     hr_name,
+                "to_name":     draft.get("salutation") or hr_name or "",
                 "to_title":    hr_title,
                 "to_linkedin": contact.get("linkedin_url", ""),
                 "subject":     subject,
