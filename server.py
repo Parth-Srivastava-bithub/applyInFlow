@@ -107,19 +107,69 @@ def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+_migrated_owners = set()
+
 def check_and_migrate_legacy_for_owner(u: str):
     """
     If the authenticated user matches the owner/creator (Parth),
-    automatically adopt existing legacy documents in MongoDB into their username.
+    automatically adopt existing legacy documents and alternate owner aliases
+    in MongoDB into their active username.
     """
-    if u in ("parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com", "yellowforesty"):
-        mdb = db.get_mongo_db()
-        if mdb is not None:
-            try:
-                mdb[db.EMAILS_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
-                mdb[db.APPLIED_COLLECTION].update_many({"username": "legacy"}, {"$set": {"username": u}})
-            except Exception:
-                pass
+    owner_aliases = ("parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com", "yellowforesty")
+    if u not in owner_aliases or u in _migrated_owners:
+        return
+
+    mdb = db.get_mongo_db()
+    if mdb is not None:
+        try:
+            from pymongo import UpdateOne
+            other_aliases = [alias for alias in ("legacy", *owner_aliases) if alias != u]
+
+            # 1. Applied collection
+            app_ops = []
+            for d in mdb[db.APPLIED_COLLECTION].find({"username": {"$in": other_aliases}}):
+                em = d.get("email", "").lower().strip()
+                if em:
+                    app_ops.append(UpdateOne(
+                        {"username": u, "email": em},
+                        {"$setOnInsert": {"username": u, "email": em, "sent_at": d.get("sent_at")}},
+                        upsert=True
+                    ))
+            if app_ops:
+                mdb[db.APPLIED_COLLECTION].bulk_write(app_ops, ordered=False)
+                mdb[db.APPLIED_COLLECTION].delete_many({"username": {"$in": other_aliases}})
+
+            # 2. Emails collection
+            email_ops = []
+            for d in mdb[db.EMAILS_COLLECTION].find({"username": {"$in": other_aliases}}):
+                em = d.get("email", "").lower().strip()
+                if em:
+                    insert_doc = {k: v for k, v in d.items() if k != "_id"}
+                    insert_doc["username"] = u
+                    email_ops.append(UpdateOne(
+                        {"username": u, "email": em},
+                        {"$setOnInsert": insert_doc},
+                        upsert=True
+                    ))
+            if email_ops:
+                mdb[db.EMAILS_COLLECTION].bulk_write(email_ops, ordered=False)
+                mdb[db.EMAILS_COLLECTION].delete_many({"username": {"$in": other_aliases}})
+
+            # 3. Local user pending file sync
+            local_legacy_pending = Path("output/users/legacy/pending.json")
+            local_u_pending = Path(f"output/users/{u}/pending.json")
+            if local_legacy_pending.exists() and (not local_u_pending.exists() or local_u_pending.stat().st_size < 100):
+                legacy_data = db._load_local_json(local_legacy_pending, [])
+                u_pending_items = []
+                for item in legacy_data:
+                    item_copy = dict(item)
+                    item_copy["username"] = u
+                    u_pending_items.append(item_copy)
+                db._save_local_json(local_u_pending, u_pending_items)
+
+            _migrated_owners.add(u)
+        except Exception as e:
+            logger.warning(f"Error during owner migration for '{u}': {e}")
 
 
 def get_current_username() -> Optional[str]:

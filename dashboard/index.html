@@ -2471,6 +2471,31 @@
             badge.style.fontWeight = '600';
           }
         }
+      } else if (type === 'LEADS_STREAM') {
+        const progFound = document.getElementById('prog-found');
+        const progStatus = document.getElementById('prog-status');
+        if (event.data.foundCount !== undefined && progFound) {
+          progFound.textContent = `${event.data.foundCount} Contacts`;
+        }
+        if (event.data.statusText && progStatus) {
+          progStatus.textContent = event.data.statusText;
+        }
+        if (Array.isArray(event.data.leads) && event.data.leads.length > 0) {
+          try {
+            await apiFetch('/api/extension/ingest', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                username: currentUsername,
+                leads: event.data.leads
+              })
+            });
+            await loadContacts();
+            await checkDbStatus();
+          } catch (err) {
+            console.warn('Real-time ingest sync:', err);
+          }
+        }
       } else if (type === 'PROGRESS') {
         const progBar = document.getElementById('prog-bar');
         const progPct = document.getElementById('prog-pct');
@@ -2490,6 +2515,9 @@
         }
         if (event.data.foundCount !== undefined && progFound) {
           progFound.textContent = `${event.data.foundCount} Contacts`;
+          if (event.data.foundCount > contacts.length) {
+            loadContacts();
+          }
         }
       } else if (type === 'COMPLETE') {
         handleScrapeCompleteFromExtension(event.data);
@@ -2511,6 +2539,19 @@
       if (progTitle) progTitle.textContent = 'Done (✓)';
       if (progStatus) progStatus.textContent = data.statusText || `Synced ${data.newCount || 0} new contacts`;
       if (progFound) progFound.textContent = `+${data.newCount || 0} Contacts`;
+
+      if (Array.isArray(data.leads) && data.leads.length > 0) {
+        try {
+          await apiFetch('/api/extension/ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: currentUsername,
+              leads: data.leads
+            })
+          });
+        } catch (e) {}
+      }
 
       toast(`Scrape complete! Synced ${data.newCount || 0} new contacts`, 'success');
 
@@ -2627,7 +2668,7 @@
     async function stopScraping() {
       if (isExtensionConnected) {
         window.postMessage({ target: 'autoapply-extension', action: 'STOP_SCRAPE' }, '*');
-        toast('Stop requested. Stopping extension...', 'info');
+        toast('Stop requested. Syncing discovered contacts...', 'info');
       } else {
         try {
           await apiFetch('/api/scrape/stop', { method: 'POST' });

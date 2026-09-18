@@ -137,22 +137,55 @@ function handleStartScrape(data, sender) {
 function handleNewLeads(newLeads, query) {
   if (!currentJob.isRunning) return;
 
+  const freshLeads = [];
   for (const lead of newLeads) {
     const em = (lead.email || lead.hr_email || "").toLowerCase().trim();
     if (em && !currentJob.existingEmails.has(em)) {
       currentJob.existingEmails.add(em);
-      currentJob.collectedLeads.push({
+      const item = {
         ...lead,
         query: query
-      });
+      };
+      currentJob.collectedLeads.push(item);
+      freshLeads.push(item);
     }
   }
 
-  sendDashboardMessage({
-    type: "PROGRESS",
-    foundCount: currentJob.collectedLeads.length,
-    statusText: `Discovered ${currentJob.collectedLeads.length} contacts so far...`
-  });
+  if (freshLeads.length > 0) {
+    // 1. Immediately stream new leads to dashboard tab so it can ingest & render in real time
+    sendDashboardMessage({
+      type: "LEADS_STREAM",
+      leads: freshLeads,
+      foundCount: currentJob.collectedLeads.length,
+      statusText: `Discovered ${currentJob.collectedLeads.length} contact(s) so far...`
+    });
+
+    // 2. Also proactively sync batch to backend
+    syncLeadsBatch(freshLeads);
+  } else {
+    sendDashboardMessage({
+      type: "PROGRESS",
+      foundCount: currentJob.collectedLeads.length,
+      statusText: `Discovered ${currentJob.collectedLeads.length} contacts so far...`
+    });
+  }
+}
+
+async function syncLeadsBatch(leads) {
+  if (!leads || !leads.length || !currentJob.serverUrl) return;
+  try {
+    const ingestUrl = `${currentJob.serverUrl}/api/extension/ingest`;
+    await fetch(ingestUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: currentJob.username,
+        leads: leads
+      })
+    });
+  } catch (err) {
+    console.warn("Background batch sync fallback:", err);
+  }
 }
 
 function handleQueryDone(query, foundCount) {
@@ -228,21 +261,22 @@ async function finishAndSyncLeads() {
     sendDashboardMessage({
       type: "COMPLETE",
       percent: 100,
+      leads: currentJob.collectedLeads,
       newCount: currentJob.collectedLeads.length,
-      statusText: `Completed with ${currentJob.collectedLeads.length} contacts (Local cache synced).`
+      totalCollected: currentJob.collectedLeads.length,
+      statusText: `Completed with ${currentJob.collectedLeads.length} contacts.`
     });
   }
 }
 
 function handleStopScrape() {
+  if (!currentJob.isRunning && currentJob.collectedLeads.length === 0) return;
   currentJob.isRunning = false;
   if (currentJob.scrapeTabId) {
     chrome.tabs.sendMessage(currentJob.scrapeTabId, { action: "STOP_SCRAPE" }).catch(() => {});
     chrome.tabs.remove(currentJob.scrapeTabId).catch(() => {});
     currentJob.scrapeTabId = null;
   }
-  sendDashboardMessage({
-    type: "PROGRESS",
-    statusText: `Scraping stopped by user. Found ${currentJob.collectedLeads.length} contacts.`
-  });
+  // Sync whatever was collected before stopping
+  finishAndSyncLeads();
 }

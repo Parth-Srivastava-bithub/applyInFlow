@@ -11,7 +11,9 @@
   "host_permissions": [
     "*://*.linkedin.com/*",
     "http://localhost/*",
+    "http://localhost:*/*",
     "http://127.0.0.1/*",
+    "http://127.0.0.1:*/*",
     "https://*.railway.app/*",
     "https://*.up.railway.app/*"
   ],
