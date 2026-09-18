@@ -47,7 +47,20 @@ Candidate Profile:
 - Contact: parthsrivastava6112004@gmail.com | +91 8887664156 | https://linkedin.com/in/parth-srivastava-dsuser/
 """
 CANDIDATE_NAME = "Parth Srivastava"
-# ─────────────────────────────────────────────────────────────────────────────
+
+# Load extracted resume profile dynamically if available
+STRUCTURED_RESUME_FILE = Path("output/structured_resume.json")
+if STRUCTURED_RESUME_FILE.exists():
+    try:
+        from resume_parser import StructuredResumeProfile, format_candidate_context_for_prompt
+        with open(STRUCTURED_RESUME_FILE, "r", encoding="utf-8") as f:
+            _sr_data = json.load(f)
+        _parsed = StructuredResumeProfile.model_validate(_sr_data)
+        CANDIDATE_PROFILE = format_candidate_context_for_prompt(_parsed)
+        if _parsed.name:
+            CANDIDATE_NAME = _parsed.name
+    except Exception as _e:
+        pass
 
 
 def dedupe_contacts(records: List[Dict]) -> List[Dict]:
