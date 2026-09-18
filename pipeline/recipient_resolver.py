@@ -37,12 +37,14 @@ NON_HUMAN_NAMES = {
     "info", "contact", "support", "jobs", "job", "help", "staffing", "services",
     "solutions", "agency", "tech", "technologies", "global", "india", "llc", "corp",
     "company", "member", "unknown", "lead", "leads", "there", "manager", "engineer",
-    "founder", "executive", "official"
+    "founder", "executive", "official", "apply", "easy apply", "applied", "click",
+    "view", "feed", "post", "connect", "follow", "message", "share", "send", "like",
+    "comment", "repost", "join", "save", "showcase", "creativity", "interview"
 }
 
 
 def is_obvious_garbage(name: str) -> bool:
-    """Returns True if the name is clearly a phrase, headline, company, or placeholder."""
+    """Returns True if the name is clearly a phrase, headline, button, company, or placeholder."""
     if not name:
         return True
     s = name.strip()
@@ -54,6 +56,8 @@ def is_obvious_garbage(name: str) -> bool:
     if len(words) == 1 and words[0].lower() in NON_HUMAN_NAMES:
         return True
     lower = s.lower()
+    if lower in NON_HUMAN_NAMES:
+        return True
     for pat in GARBAGE_PATTERNS:
         if re.search(pat, lower):
             return True
@@ -69,12 +73,8 @@ def resolve_salutation_with_groq(
     model: str = None,
 ) -> Optional[str]:
     """
-    Calls Groq to determine the appropriate recipient greeting:
-    - Real human first name (e.g. 'Bharat', 'Priya', 'Sarah')
-    - 'Sir' or 'Ma'am' if gender is evident from pronouns/text
-    - None if unknown (so the email opens with 'Hi,')
-
-    STRICT RULE: Never extracts or guesses names from the email address/username.
+    Calls Groq to extract the recruiter's real human first name from the email address
+    or context, or determine gender (Sir/Ma'am), or return None (defaults to 'Hi,').
     """
     clean_email = (email or "").strip().lower()
     cache_key = (clean_email, (author_name or "").strip().lower()[:40])
@@ -97,22 +97,28 @@ def resolve_salutation_with_groq(
     is_openai = any(use_model.startswith(p) for p in ("gpt-", "o1", "o3", "chatgpt"))
     api_url = "https://api.openai.com/v1/chat/completions" if is_openai else "https://api.groq.com/openai/v1/chat/completions"
 
-    prompt = f"""You are an expert at analyzing LinkedIn recruiter posts and contact information.
-Determine how a professional cold job application email should be addressed.
+    prompt = f"""You are an expert at extracting recipient contact names from Gmail addresses and LinkedIn context.
+Determine the appropriate recipient greeting for a professional cold job application email.
 
 CRITICAL RULES:
-1. Output the recipient's real human FIRST NAME ONLY if clearly present in the Author Name or mentioned in the Post Text (e.g., 'Bharat', 'Priya', 'Sarah', 'Alex').
-   - NEVER treat 'HR', 'Team', 'Recruiter', 'Admin', 'Talent' as a person's name.
-2. STRICTLY FORBIDDEN: NEVER invent, derive, or split a name from the email address or username (e.g., 'bharatkp@gmail.com' -> DO NOT output 'Bharatkp', 'softwared250@gmail.com' -> DO NOT output 'Softwared'). An email address username could be anything and is NOT a human name.
-3. If the author name is a company, sentence, action, slogan, or headline (e.g. 'Showcase Your Creativity', 'Final Interview', 'Save Mutual Time', 'Tech Solutions Pvt Ltd', 'Hiring Manager'), it is NOT a person's name - ignore it.
-4. If a genuine human name is NOT found, but gender/honorific is clearly discernible (e.g., from 'she/her' pronouns or 'Ms./Mrs.' -> 'Ma\'am', 'he/him' or 'Mr.' -> 'Sir'), return 'Sir' or 'Ma\'am'.
-5. If neither a real human name nor gender is known, return null.
+1. Extract the recipient's real human FIRST NAME from the email address or context:
+   - 'bharatkp24@gmail.com' -> 'Bharat'
+   - 'derinmicheal28@gmail.com' -> 'Derin'
+   - 'upasanamodi2015@gmail.com' -> 'Upasana'
+   - 'priya.sharma99@gmail.com' -> 'Priya'
+   - 'john.smith@gmail.com' -> 'John'
+   - Strip out any numbers (24, 28, 2015), initials, or suffixes (e.g. 'kp' in bharatkp -> 'Bharat').
+2. STRICTLY FORBIDDEN:
+   - NEVER use UI action words, buttons, or slogans as a name (e.g. 'Apply', 'Easy Apply', 'Connect', 'Follow', 'Showcase', 'Final Interview', 'Hiring Manager', 'Careers', 'Info', 'Software').
+3. If the email address does NOT contain a human name (e.g., 'softwared250@gmail.com', 'careers@company.com', 'info@techcorp.com', 'hiring@...'):
+   - Check if context indicates gender ('She/Her' -> 'Ma'am', 'He/Him' -> 'Sir').
+   - Otherwise, return null.
+4. If neither a real human first name nor gender can be found, return null.
 
-Context:
-- Author Name: {(author_name or '').strip()}
-- Headline/Title: {(title or '').strip()}
-- Target Email: {clean_email}
-- Post Text: {(post_text or '')[:600].strip()}
+Context / Author: {(author_name or '').strip()}
+Headline / Title: {(title or '').strip()}
+Target Email: {clean_email}
+Post Snippet: {(post_text or '')[:300].strip()}
 
 Respond with ONLY valid JSON:
 {{"salutation": "<First name or Sir or Ma'am or null>"}}
@@ -155,17 +161,12 @@ Respond with ONLY valid JSON:
                         sal_clean = "Sir"
                     else:
                         sal_clean = None
+                elif is_obvious_garbage(sal_clean):
+                    sal_clean = None
                 else:
-                    # Validate that it's not a garbage token or derived from email
-                    local_email = clean_email.split("@")[0] if "@" in clean_email else ""
-                    if local_email and sal_clean.lower() == local_email.lower():
+                    sal_clean = sal_clean.split()[0].capitalize()
+                    if sal_clean.lower() in NON_HUMAN_NAMES:
                         sal_clean = None
-                    elif is_obvious_garbage(sal_clean):
-                        sal_clean = None
-                    else:
-                        sal_clean = sal_clean.split()[0].capitalize()
-                        if sal_clean.lower() in NON_HUMAN_NAMES:
-                            sal_clean = None
                 _SALUTATION_CACHE[cache_key] = sal_clean
                 return sal_clean
     except Exception as exc:

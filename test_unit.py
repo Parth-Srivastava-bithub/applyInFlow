@@ -333,12 +333,21 @@ class TestZeroDataLeakage(unittest.TestCase):
         )
         self.assertEqual(sal_female, "Ma'am")
 
-        # 3. Garbage headline + email username -> None (so email opens with Hi,)
-        sal_none = resolve_salutation_with_groq(
-            author_name="Showcase Your Creativity",
+        # 3. Email with name extracts the real name even if author is UI button like Apply
+        sal_bharat = resolve_salutation_with_groq(
+            author_name="Apply",
             title="Staffing",
-            post_text="Hiring engineers. Send resume to bharatkp@gmail.com",
-            email="bharatkp@gmail.com"
+            post_text="Hiring engineers. Send resume to bharatkp24@gmail.com",
+            email="bharatkp24@gmail.com"
+        )
+        self.assertEqual(sal_bharat, "Bharat")
+
+        # 4. Non-human email with no gender -> None (so email opens with Hi,)
+        sal_none = resolve_salutation_with_groq(
+            author_name="Apply",
+            title="Software Solutions",
+            post_text="Hiring engineers. Send resume to softwared250@gmail.com",
+            email="softwared250@gmail.com"
         )
         self.assertIsNone(sal_none)
 
