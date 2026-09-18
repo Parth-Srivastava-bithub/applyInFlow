@@ -2669,7 +2669,14 @@
             loadContacts();
           }
         }
-      } else if (type === 'COMPLETE') {
+        // If progress message indicates the session was stopped or aborted, unlock the UI
+        const sTxt = (event.data.statusText || '').toLowerCase();
+        if (sTxt.includes('stopped') || sTxt.includes('closed') || sTxt.includes('finished')) {
+          resetScrapeUi();
+          loadContacts();
+          checkDbStatus();
+        }
+      } else if (type === 'COMPLETE' || type === 'STOPPED') {
         handleScrapeCompleteFromExtension(event.data);
       } else if (type === 'ERROR') {
         toast('Extension Error: ' + (event.data.message || 'Scrape issue'), 'error');
@@ -2703,7 +2710,7 @@
         } catch (e) {}
       }
 
-      toast(`Scrape complete! Synced ${data.newCount || 0} new contacts`, 'success');
+      toast(`Scrape session complete. Synced ${data.newCount || 0} contacts`, 'success');
 
       await loadContacts();
       await checkDbStatus();
@@ -2718,6 +2725,8 @@
         btn.textContent = '🔗 Search LinkedIn for HR Emails';
       }
       if (btnStop) {
+        btnStop.disabled = false;
+        btnStop.textContent = '⛔ Stop';
         btnStop.style.display = 'none';
       }
     }
@@ -2737,6 +2746,8 @@
       }
     } catch(e) {}
 
+    let activeScrapePollTimer = null;
+
     async function startScrapeWithValues() {
       if (!currentUsername) {
         toast('Please sign in first to run scraper and store contacts', 'warning');
@@ -2754,6 +2765,8 @@
 
       btn.disabled = true;
       btn.textContent = 'Searching...';
+      btnStop.disabled = false;
+      btnStop.textContent = '⛔ Stop';
       btnStop.style.display = 'inline-flex';
       progBox.style.display = 'block';
       progBar.style.width = '5%';
@@ -2776,7 +2789,8 @@
       }
 
       // Fallback: Use local Playwright CDP endpoint
-      const pollTimer = setInterval(async () => {
+      if (activeScrapePollTimer) clearInterval(activeScrapePollTimer);
+      activeScrapePollTimer = setInterval(async () => {
         try {
           const res = await apiFetch('/api/scrape-status');
           const st = await res.json();
@@ -2810,21 +2824,46 @@
       } catch (err) {
         toast('Scrape error: ' + err.message, 'error');
       } finally {
-        clearInterval(pollTimer);
+        if (activeScrapePollTimer) {
+          clearInterval(activeScrapePollTimer);
+          activeScrapePollTimer = null;
+        }
         resetScrapeUi();
       }
     }
 
     async function stopScraping() {
+      const btnStop = document.getElementById('btn-stop-scrape');
+      if (btnStop) {
+        btnStop.disabled = true;
+        btnStop.textContent = 'Stopping...';
+      }
+      const progStatus = document.getElementById('prog-status');
+      if (progStatus) {
+        progStatus.textContent = 'Scraping stopped by user.';
+      }
+
       if (isExtensionConnected) {
         window.postMessage({ target: 'autoapply-extension', action: 'STOP_SCRAPE' }, '*');
-        toast('Stop requested. Syncing discovered contacts...', 'info');
+        toast('Scraping stopped. Ready for new search.', 'info');
       } else {
         try {
           await apiFetch('/api/scrape/stop', { method: 'POST' });
           toast('Stop requested. Finishing current query...', 'info');
         } catch (e) {}
       }
+
+      if (activeScrapePollTimer) {
+        clearInterval(activeScrapePollTimer);
+        activeScrapePollTimer = null;
+      }
+
+      // Guarantee UI unfreezes immediately so user can run new queries
+      setTimeout(() => {
+        resetScrapeUi();
+        loadContacts();
+        checkDbStatus();
+      }, 500);
     }
 
     async function loadProfile() {

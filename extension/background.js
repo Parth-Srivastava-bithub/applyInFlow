@@ -74,10 +74,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     if (currentJob.isRunning) {
       currentJob.isRunning = false;
       sendDashboardMessage({
-        type: "PROGRESS",
-        statusText: "Scraping tab was closed.",
-        foundCount: currentJob.collectedLeads.length
+        type: "COMPLETE",
+        percent: 100,
+        statusText: `Scraping tab closed by user. Preserved ${currentJob.collectedLeads.length} contacts.`,
+        foundCount: currentJob.collectedLeads.length,
+        newCount: currentJob.collectedLeads.length
       });
+      if (currentJob.collectedLeads.length > 0) {
+        finishAndSyncLeads();
+      }
     }
   }
 });
