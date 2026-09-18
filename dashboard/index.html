@@ -2333,7 +2333,7 @@
     }
 
     function quickSignIn(username, displayName, email) {
-      applyUserSession(username, displayName, email);
+      applyUserSession(username, displayName, email, true);
       closeSignInModal();
     }
 
@@ -2342,7 +2342,7 @@
       const inp = document.getElementById('signin-username-input');
       const val = inp ? inp.value.trim() : '';
       if (!val) return;
-      applyUserSession(val, val, val.includes('@') ? val : '');
+      applyUserSession(val, val, val.includes('@') ? val : '', true);
       closeSignInModal();
     }
 
@@ -2360,8 +2360,9 @@
       }
     }
 
-    async function applyUserSession(username, displayName, email) {
+    async function applyUserSession(username, displayName, email, showToast = false) {
       if (!username) return;
+      const isAlreadyActive = (currentUsername === username);
       currentUsername = username;
       localStorage.setItem('autoapply_user', currentUsername);
 
@@ -2388,12 +2389,16 @@
       const avatarEl = document.getElementById('sidebar-user-avatar');
       if (avatarEl) avatarEl.textContent = (dName[0] || 'U').toUpperCase();
 
-      toast(`Signed in as ${dName}`, 'success');
+      if (showToast) {
+        toast(`Signed in as ${dName}`, 'success');
+      }
 
-      await loadProfile();
-      await checkDbStatus();
-      await loadContacts();
-      await loadDrafts();
+      if (!isAlreadyActive) {
+        await loadProfile();
+        await checkDbStatus();
+        await loadContacts();
+        await loadDrafts();
+      }
     }
 
     function signOutUser() {
@@ -2444,7 +2449,7 @@
         const isOwner = ['yellowforesty', 'parth', 'parthsrivastava', 'parthsrivastava6112004_gmail_com'].includes(savedUser.toLowerCase());
         const dName = isOwner ? 'Parth Srivastava' : savedUser;
         const sEmail = isOwner ? 'parthsrivastava6112004@gmail.com' : (savedUser.includes('@') ? savedUser : '');
-        await applyUserSession(savedUser, dName, sEmail);
+        await applyUserSession(savedUser, dName, sEmail, false);
       } else {
         renderLockedState();
       }
@@ -2475,12 +2480,12 @@
           }
           clerkInitialized = true;
 
-          async function syncUserState(user) {
+          async function syncUserState(user, showToast = false) {
             if (user) {
               const rawUser = user.username || (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || 'user';
               const dName = user.fullName || user.firstName || rawUser;
               const sEmail = (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || '';
-              await applyUserSession(rawUser, dName, sEmail);
+              await applyUserSession(rawUser, dName, sEmail, showToast);
 
               if (userSlot) {
                 userSlot.style.display = 'inline-block';
@@ -2493,12 +2498,23 @@
 
           clerk.addListener(async ({ user }) => {
             if (user) {
-              await syncUserState(user);
+              const rawUser = user.username || (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || 'user';
+              if (currentUsername !== rawUser) {
+                await syncUserState(user, true);
+              }
             }
           });
 
           if (clerk.user) {
-            await syncUserState(clerk.user);
+            const rawUser = clerk.user.username || (clerk.user.primaryEmailAddress && clerk.user.primaryEmailAddress.emailAddress) || 'user';
+            if (!currentUsername || currentUsername !== rawUser) {
+              await syncUserState(clerk.user, false);
+            } else if (userSlot) {
+              userSlot.style.display = 'inline-block';
+              clerk.mountUserButton(userSlot, {
+                afterSignOutUrl: window.location.href,
+              });
+            }
           }
         }
       } catch (err) {
@@ -3769,6 +3785,10 @@
 
     function toast(msg, type='info') {
       const box = document.getElementById('toast-box');
+      if (!box) return;
+      // Prevent duplicate identical toasts from stacking up
+      const existing = Array.from(box.querySelectorAll('.toast'));
+      if (existing.some(el => el.textContent === msg)) return;
       const el = document.createElement('div');
       el.className = 'toast';
       el.textContent = msg;
