@@ -136,6 +136,7 @@ def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+OWNER_ALIASES = ("legacy", "parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com", "yellowforesty")
 _migrated_owners = set()
 
 def check_and_migrate_legacy_for_owner(u: str):
@@ -144,15 +145,14 @@ def check_and_migrate_legacy_for_owner(u: str):
     automatically adopt existing legacy documents and alternate owner aliases
     in MongoDB into their active username.
     """
-    owner_aliases = ("parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com", "yellowforesty")
-    if u not in owner_aliases or u in _migrated_owners:
+    if u not in OWNER_ALIASES or u in _migrated_owners:
         return
 
     mdb = db.get_mongo_db()
     if mdb is not None:
         try:
             from pymongo import UpdateOne
-            other_aliases = [alias for alias in ("legacy", *owner_aliases) if alias != u]
+            other_aliases = [alias for alias in OWNER_ALIASES if alias != u]
 
             # 1. Applied collection
             app_ops = []
@@ -198,7 +198,7 @@ def check_and_migrate_legacy_for_owner(u: str):
 
             _migrated_owners.add(u)
         except Exception as e:
-            logger.warning(f"Error during owner migration for '{u}': {e}")
+            axiom_logger.warning(f"Error during owner migration for '{u}': {e}")
 
 
 def get_current_username() -> Optional[str]:
@@ -266,9 +266,15 @@ def load_profile(username: Optional[str] = None) -> dict:
         return default
 
     u = db.sanitize_username(username)
+    is_owner = u in OWNER_ALIASES
+
+    # 1. Primary: load from DB (PostgreSQL / MongoDB)
+    db_saved = db.load_user_profile_db(u)
+
+    # 2. Secondary: load from local user file
     p_file = get_user_profile_file(u)
-    saved = load_json(p_file, {})
-    is_owner = u in ("legacy", "parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com")
+    local_saved = load_json(p_file, {})
+    saved = db_saved or local_saved
     if not saved and is_owner:
         saved = load_json(PROFILE_FILE, {})
 
@@ -294,9 +300,11 @@ def save_user_profile(data: dict, username: str = "legacy") -> dict:
     profile = load_profile(u)
     profile.update(data)
     save_json(p_file, profile)
-    is_owner = u in ("legacy", "parth", "parthsrivastava", "parthsrivastava6112004_gmail_com", "parthsrivastava6112001_gmail_com")
+    is_owner = u in OWNER_ALIASES
     if is_owner:
         save_json(PROFILE_FILE, profile)
+    # Persist in PostgreSQL / MongoDB so user credentials survive container restarts
+    db.save_user_profile_db(u, profile)
     return profile
 
 
@@ -577,23 +585,23 @@ def save_profile_route():
     profile = save_user_profile(data, username=u)
 
     env_updates = {}
-    if "groq_api_key" in data and u == "legacy":
+    if "groq_api_key" in data and u in OWNER_ALIASES:
         groq_val = (data["groq_api_key"] or "").strip()
         os.environ["GROQ_API_KEY"] = groq_val
         global GROQ_API_KEY
         GROQ_API_KEY = groq_val
         env_updates["GROQ_API_KEY"] = groq_val
 
-    if "openai_api_key" in data and u == "legacy":
+    if "openai_api_key" in data and u in OWNER_ALIASES:
         openai_val = (data["openai_api_key"] or "").strip()
         os.environ["OPENAI_API_KEY"] = openai_val
         global OPENAI_API_KEY
         OPENAI_API_KEY = openai_val
         env_updates["OPENAI_API_KEY"] = openai_val
 
-    if "gmail_sender" in data and u == "legacy":
+    if "gmail_sender" in data and u in OWNER_ALIASES:
         env_updates["GMAIL_SENDER"] = (data["gmail_sender"] or "").strip()
-    if "gmail_app_password" in data and u == "legacy":
+    if "gmail_app_password" in data and u in OWNER_ALIASES:
         env_updates["GMAIL_APP_PASSWORD"] = (data["gmail_app_password"] or "").strip()
 
     if env_updates:
@@ -605,6 +613,8 @@ def save_profile_route():
     return jsonify({
         "ok": True,
         "mongo_connected": db.is_db_connected(),
+        "db_connected": db.is_db_connected(),
+        "db_type": db.get_active_db_type(),
         "username": u
     })
 
@@ -1221,6 +1231,76 @@ def generate_email():
 
 
 
+def send_smtp_email(sender: str, password: str, to_email: str, msg_str: str, timeout: int = 15) -> None:
+    """
+    Sends an email using Gmail SMTP with strict socket timeouts and port fallback.
+    Tries port 465 (SSL) first with timeout=15s. If it times out or fails to connect
+    (common on cloud container networks like Railway), falls back to port 587 (STARTTLS).
+    """
+    last_err = None
+
+    # Attempt 1: Port 465 (SSL)
+    try:
+        axiom_logger.info(
+            "SMTP_ATTEMPT",
+            f"Attempting Gmail SMTP connection on port 465 (timeout={timeout}s)...",
+            port=465,
+            recipient=to_email
+        )
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=timeout) as smtp:
+            smtp.login(sender, password)
+            smtp.sendmail(sender, to_email, msg_str)
+            axiom_logger.info(
+                "SMTP_SUCCESS",
+                f"Email delivered successfully via port 465 to {to_email}",
+                port=465,
+                recipient=to_email
+            )
+            return
+    except Exception as e:
+        last_err = e
+        axiom_logger.warning(
+            "SMTP_PORT_465_FAILED",
+            f"SMTP on port 465 failed or timed out: {e}. Falling back to port 587 (STARTTLS)...",
+            port=465,
+            recipient=to_email,
+            error=str(e)
+        )
+
+    # Attempt 2: Port 587 (STARTTLS)
+    try:
+        axiom_logger.info(
+            "SMTP_ATTEMPT",
+            f"Attempting Gmail SMTP connection on port 587 (STARTTLS, timeout={timeout}s)...",
+            port=587,
+            recipient=to_email
+        )
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=timeout) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(sender, password)
+            smtp.sendmail(sender, to_email, msg_str)
+            axiom_logger.info(
+                "SMTP_SUCCESS",
+                f"Email delivered successfully via port 587 to {to_email}",
+                port=587,
+                recipient=to_email
+            )
+            return
+    except Exception as e:
+        last_err = e
+        axiom_logger.error(
+            "SMTP_PORT_587_FAILED",
+            f"SMTP on port 587 also failed: {e}",
+            port=587,
+            recipient=to_email,
+            error=str(e)
+        )
+        raise RuntimeError(f"Failed to send email via SMTP (tried ports 465 & 587): {last_err}") from last_err
+
+
+
 @app.route("/api/send", methods=["POST"])
 def send_email():
     u = get_current_username()
@@ -1278,9 +1358,7 @@ def send_email():
                     part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
                     msg.attach(part)
 
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-                smtp.login(sender, password)
-                smtp.sendmail(sender, to_email, msg.as_string())
+            send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
 
             step_meta["attached_resume"] = attached_resume
             step_meta["subject"] = subject

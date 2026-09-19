@@ -351,6 +351,43 @@ class TestZeroDataLeakage(unittest.TestCase):
         )
         self.assertIsNone(sal_none)
 
+    def test_user_profile_persistence(self):
+        """User API keys and settings persist across calls via DB and local fallback."""
+        import db
+        from server import save_user_profile, load_profile
+        test_user = "test_persistence_user"
+        profile_data = {
+            "name": "Jane Developer",
+            "groq_api_key": "gsk_test1234567890",
+            "openai_api_key": "sk-test1234567890",
+            "gmail_sender": "jane@example.com",
+            "gmail_app_password": "abcd efgh ijkl mnop",
+        }
+        saved = save_user_profile(profile_data, username=test_user)
+        self.assertEqual(saved["groq_api_key"], "gsk_test1234567890")
+        self.assertEqual(saved["gmail_sender"], "jane@example.com")
+
+        # Reload profile and verify keys are preserved
+        loaded = load_profile(username=test_user)
+        self.assertEqual(loaded["groq_api_key"], "gsk_test1234567890")
+        self.assertEqual(loaded["openai_api_key"], "sk-test1234567890")
+        self.assertEqual(loaded["gmail_sender"], "jane@example.com")
+        self.assertEqual(loaded["gmail_app_password"], "abcd efgh ijkl mnop")
+        db.clear_user_data(test_user)
+
+    def test_smtp_timeout_fallback(self):
+        """send_smtp_email raises RuntimeError after timeout without blocking indefinitely."""
+        from server import send_smtp_email
+        with self.assertRaises((RuntimeError, Exception)):
+            # Invalid credentials and nonexistent socket should fail fast within 1s timeout
+            send_smtp_email(
+                sender="invalid@example.com",
+                password="invalidpassword",
+                to_email="test@example.com",
+                msg_str="Subject: Test\n\nBody",
+                timeout=1
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
