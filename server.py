@@ -47,11 +47,40 @@ from pipeline.name_cleaner import clean_name
 
 load_dotenv()
 import db
+from axiom_logger import get_logger
+
+axiom_logger = get_logger(service="backend_server")
 
 app = Flask(__name__, static_folder="dashboard", static_url_path="")
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+@app.errorhandler(Exception)
+def handle_server_exception(e):
+    from werkzeug.exceptions import HTTPException
+    run_id = request.headers.get("X-Run-ID") or "web_request"
+    if isinstance(e, HTTPException):
+        if e.code >= 500:
+            axiom_logger.error(
+                "SERVER_HTTP_500",
+                f"HTTP {e.code} error on {request.method} {request.path}: {e}",
+                error=str(e),
+                path=request.path,
+                method=request.method,
+                run_id=run_id,
+            )
+        return jsonify(error=str(e)), e.code
+
+    axiom_logger.error(
+        "SERVER_UNHANDLED_EXCEPTION",
+        f"Unhandled exception on {request.method} {request.path}: {e}",
+        error=str(e),
+        path=request.path,
+        method=request.method,
+        run_id=run_id,
+    )
+    return jsonify({"error": "Internal server error", "detail": str(e)}), 500
 
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
 GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
@@ -1024,6 +1053,14 @@ def extension_ingest():
 
     saved = db.save_contacts(processed, username=u)
     total_pending = len(db.get_pending_gmails(username=u))
+    axiom_logger.info(
+        "EXTENSION_INGEST",
+        f"Ingested {len(processed)} leads from extension for user '{u}' (saved: {saved})",
+        username=u,
+        received=len(leads),
+        saved=saved,
+        total_pending=total_pending,
+    )
     app.logger.info(f"Extension ingested {len(saved)} contacts for user '{u}'. Total pending: {total_pending}")
 
     return jsonify({
@@ -1134,46 +1171,52 @@ def generate_email():
 - Location: {profile['location']}"""
 
     try:
-        # ── Delegate to isolated email-drafting module with user's scoped API key ──
-        from pipeline.email_drafter import draft_email as _draft_email
-        is_openai = any(req_model.startswith(p) for p in ("gpt-", "o1", "o3", "chatgpt"))
-        user_api_key = (profile.get("openai_api_key") if is_openai else profile.get("groq_api_key")) or ""
-        portfolio_url = profile.get("portfolio_url") or profile.get("website") or "https://parthml.in"
-        draft = _draft_email(
-            hr_name=hr_name,
-            hr_title=hr_title,
-            hr_email=hr_email,
-            post_text=relevant_post,
-            candidate_context=candidate_context,
-            cand_name=cand_name,
-            model=req_model,
-            api_key=user_api_key,
-            portfolio_url=portfolio_url,
-        )
-        subject = draft["subject"]
-        body    = draft["body"]
-        result  = draft["raw"]
-
-        # Compute match & fit score with dynamic proportional normalization
-        fit_data = {}
-        try:
-            from scorer import score_match
-            fit_data = score_match(
-                post_text=post_text or relevant_post,
-                candidate_profile=profile,
-                hr_title=hr_title
+        with axiom_logger.step("GENERATE_EMAIL", description=f"Generating email for {hr_email}", email=hr_email, model=req_model, username=u) as step_meta:
+            # ── Delegate to isolated email-drafting module with user's scoped API key ──
+            from pipeline.email_drafter import draft_email as _draft_email
+            is_openai = any(req_model.startswith(p) for p in ("gpt-", "o1", "o3", "chatgpt"))
+            user_api_key = (profile.get("openai_api_key") if is_openai else profile.get("groq_api_key")) or ""
+            portfolio_url = profile.get("portfolio_url") or profile.get("website") or "https://parthml.in"
+            draft = _draft_email(
+                hr_name=hr_name,
+                hr_title=hr_title,
+                hr_email=hr_email,
+                post_text=relevant_post,
+                candidate_context=candidate_context,
+                cand_name=cand_name,
+                model=req_model,
+                api_key=user_api_key,
+                portfolio_url=portfolio_url,
             )
-        except Exception as fit_err:
-            print(f"Scoring error: {fit_err}")
+            subject = draft["subject"]
+            body    = draft["body"]
+            result  = draft["raw"]
 
-        return jsonify({
-            "subject": subject,
-            "body": body,
-            "raw": result,
-            "resolved_name": draft.get("salutation") or hr_name or "",
-            "fit": fit_data
-        })
+            # Compute match & fit score with dynamic proportional normalization
+            fit_data = {}
+            try:
+                from scorer import score_match
+                fit_data = score_match(
+                    post_text=post_text or relevant_post,
+                    candidate_profile=profile,
+                    hr_title=hr_title
+                )
+                step_meta["fit_score"] = fit_data.get("score")
+            except Exception as fit_err:
+                print(f"Scoring error: {fit_err}")
+
+            step_meta["subject"] = subject
+            step_meta["body_len"] = len(body)
+
+            return jsonify({
+                "subject": subject,
+                "body": body,
+                "raw": result,
+                "resolved_name": draft.get("salutation") or hr_name or "",
+                "fit": fit_data
+            })
     except Exception as e:
+        axiom_logger.error("GENERATE_EMAIL_FAILED", f"Email generation failed for {hr_email}: {e}", email=hr_email, error=str(e), username=u)
         return jsonify({"error": str(e)}), 500
 
 
@@ -1208,61 +1251,66 @@ def send_email():
         IN_FLIGHT_SENDS.add(clean_to)
 
     try:
-        msg = MIMEMultipart()
-        msg["Subject"] = subject
-        msg["From"]    = sender
-        msg["To"]      = to_email
-        msg.attach(MIMEText(body, "plain"))
+        with axiom_logger.step("SEND_EMAIL", description=f"Sending email to {to_email}", recipient=to_email, username=u) as step_meta:
+            msg = MIMEMultipart()
+            msg["Subject"] = subject
+            msg["From"]    = sender
+            msg["To"]      = to_email
+            msg.attach(MIMEText(body, "plain"))
 
-        tailored_fn = data.get("tailored_resume_filename") or ""
-        attached_resume = False
+            tailored_fn = data.get("tailored_resume_filename") or ""
+            attached_resume = False
 
-        if tailored_fn:
-            tailored_path = TAILORED_RESUMES_DIR / secure_filename(tailored_fn)
-            if tailored_path.exists():
-                with open(tailored_path, "rb") as f:
-                    part = MIMEApplication(f.read(), Name="Parth_Srivastava_Resume.pdf")
-                part['Content-Disposition'] = 'attachment; filename="Parth_Srivastava_Resume.pdf"'
-                msg.attach(part)
-                attached_resume = True
+            if tailored_fn:
+                tailored_path = TAILORED_RESUMES_DIR / secure_filename(tailored_fn)
+                if tailored_path.exists():
+                    with open(tailored_path, "rb") as f:
+                        part = MIMEApplication(f.read(), Name="Parth_Srivastava_Resume.pdf")
+                    part['Content-Disposition'] = 'attachment; filename="Parth_Srivastava_Resume.pdf"'
+                    msg.attach(part)
+                    attached_resume = True
 
-        if not attached_resume and resume_fn:
-            resume_path = RESUME_DIR / resume_fn
-            if resume_path.exists():
-                with open(resume_path, "rb") as f:
-                    part = MIMEApplication(f.read(), Name=resume_fn)
-                part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
-                msg.attach(part)
+            if not attached_resume and resume_fn:
+                resume_path = RESUME_DIR / resume_fn
+                if resume_path.exists():
+                    with open(resume_path, "rb") as f:
+                        part = MIMEApplication(f.read(), Name=resume_fn)
+                    part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
+                    msg.attach(part)
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(sender, password)
-            smtp.sendmail(sender, to_email, msg.as_string())
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                smtp.login(sender, password)
+                smtp.sendmail(sender, to_email, msg.as_string())
 
-        # Permanently record applied email in user's sent collection (strictly NO CONTEXT, limit 200)
-        to_name = resolve_contact_name(data.get("to_name"), clean_to)
-        db.mark_email_applied(clean_to, name=to_name, subject=subject, body=body, username=u)
+            step_meta["attached_resume"] = attached_resume
+            step_meta["subject"] = subject
 
-        drafts_file = get_user_drafts_file(u)
-        emails = load_json(drafts_file, [])
-        for e in emails:
-            if (e.get("to_email") or "").lower().strip() == clean_to:
-                e["status"] = "sent"
-        save_json(drafts_file, emails)
+            # Permanently record applied email in user's sent collection (strictly NO CONTEXT, limit 200)
+            to_name = resolve_contact_name(data.get("to_name"), clean_to)
+            db.mark_email_applied(clean_to, name=to_name, subject=subject, body=body, username=u)
 
-        # Append to sent_log.json if legacy user
-        if u == "legacy":
-            sent_log = load_json(SENT_LOG, [])
-            if not any((r.get("email") or r.get("to") or "").lower().strip() == clean_to for r in sent_log):
-                sent_log.append({
-                    "email": clean_to,
-                    "name": to_name,
-                    "subject": subject,
-                    "sent_at": datetime.now().isoformat()
-                })
-                save_json(SENT_LOG, sent_log)
+            drafts_file = get_user_drafts_file(u)
+            emails = load_json(drafts_file, [])
+            for e in emails:
+                if (e.get("to_email") or "").lower().strip() == clean_to:
+                    e["status"] = "sent"
+            save_json(drafts_file, emails)
 
-        return jsonify({"ok": True, "message": f"Email sent to {to_email}"})
+            # Append to sent_log.json if legacy user
+            if u == "legacy":
+                sent_log = load_json(SENT_LOG, [])
+                if not any((r.get("email") or r.get("to") or "").lower().strip() == clean_to for r in sent_log):
+                    sent_log.append({
+                        "email": clean_to,
+                        "name": to_name,
+                        "subject": subject,
+                        "sent_at": datetime.now().isoformat()
+                    })
+                    save_json(SENT_LOG, sent_log)
+
+            return jsonify({"ok": True, "message": f"Email sent to {to_email}"})
     except Exception as e:
+        axiom_logger.error("SEND_EMAIL_FAILED", f"Failed to send email to {to_email}: {e}", recipient=to_email, error=str(e), username=u)
         return jsonify({"error": str(e)}), 500
     finally:
         with SEND_LOCK:

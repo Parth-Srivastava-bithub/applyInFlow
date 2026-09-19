@@ -20,6 +20,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from pipeline.email_drafter import draft_email
+from axiom_logger import get_logger
+
+axiom_logger = get_logger(service="email_generator")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
@@ -76,15 +79,23 @@ def dedupe_contacts(records: List[Dict]) -> List[Dict]:
 
 
 def main():
+    run_id = axiom_logger.new_run()
+    axiom_logger.info("00_START", "Starting cold email generation batch", model=MODEL)
+
     if not INPUT_JSON.exists():
-        print(f"ERROR: {INPUT_JSON} not found. Run run_posts.py first.")
+        err_msg = f"{INPUT_JSON} not found. Run run_posts.py first."
+        axiom_logger.error("00_INPUT_MISSING", err_msg)
+        print(f"ERROR: {err_msg}")
         sys.exit(1)
 
-    records = json.loads(INPUT_JSON.read_text(encoding="utf-8"))
-    contacts = dedupe_contacts(records)
+    with axiom_logger.step("01_LOAD_CONTACTS", description="Loading and deduplicating contacts from JSON") as meta:
+        records = json.loads(INPUT_JSON.read_text(encoding="utf-8"))
+        contacts = dedupe_contacts(records)
+        meta["total_records"] = len(records)
+        meta["unique_contacts"] = len(contacts)
 
     print(f"\n{'='*60}")
-    print(f"[*] Groq Cold Email Generator")
+    print(f"[*] Groq Cold Email Generator [Run ID: {run_id}]")
     print(f"    Model   : {MODEL}")
     print(f"    Contacts: {len(contacts)} unique HR emails")
     print(f"{'='*60}\n")
@@ -99,43 +110,58 @@ def main():
         print(f"[{i}/{len(contacts)}] Generating email for: {hr_name} <{hr_email}>")
 
         try:
-            draft = draft_email(
-                hr_name=hr_name,
-                hr_title=hr_title,
-                hr_email=hr_email,
-                post_text=post_text,
-                candidate_context=CANDIDATE_PROFILE,
-                cand_name=CANDIDATE_NAME,
-                model=MODEL,
-            )
-            subject = draft["subject"]
-            body    = draft["body"]
+            with axiom_logger.step("02_DRAFT_EMAIL", description=f"Drafting email for {hr_email}", email=hr_email, name=hr_name) as meta:
+                draft = draft_email(
+                    hr_name=hr_name,
+                    hr_title=hr_title,
+                    hr_email=hr_email,
+                    post_text=post_text,
+                    candidate_context=CANDIDATE_PROFILE,
+                    cand_name=CANDIDATE_NAME,
+                    model=MODEL,
+                )
+                subject = draft["subject"]
+                body    = draft["body"]
+                meta["subject"] = subject
+                meta["body_len"] = len(body)
 
-            print(f"  Subject : {subject}")
-            print(f"  Preview : {body[:120].replace(chr(10), ' ')}...")
-            print()
+                print(f"  Subject : {subject}")
+                print(f"  Preview : {body[:120].replace(chr(10), ' ')}...")
+                print()
 
-            results.append({
-                "to_email":    hr_email,
-                "to_name":     draft.get("salutation") or hr_name or "",
-                "to_title":    hr_title,
-                "to_linkedin": contact.get("linkedin_url", ""),
-                "subject":     subject,
-                "body":        body,
-                "raw":         draft["raw"],
-                "query":       contact.get("query", ""),
-            })
+                results.append({
+                    "to_email":    hr_email,
+                    "to_name":     draft.get("salutation") or hr_name or "",
+                    "to_title":    hr_title,
+                    "to_linkedin": contact.get("linkedin_url", ""),
+                    "subject":     subject,
+                    "body":        body,
+                    "raw":         draft["raw"],
+                    "query":       contact.get("query", ""),
+                })
         except Exception as e:
             print(f"  ERROR: {e}\n")
+            axiom_logger.error("02_DRAFT_EMAIL_ERROR", f"Error drafting email for {hr_email}: {e}", email=hr_email, error=str(e))
             results.append({
                 "to_email": hr_email,
                 "to_name":  hr_name,
                 "error":    str(e),
             })
 
-    OUTPUT_JSON.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+    with axiom_logger.step("03_SAVE_OUTPUT", description="Writing cold emails to output JSON", count=len(results)) as meta:
+        OUTPUT_JSON.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        meta["file"] = str(OUTPUT_JSON)
+
+    successful_count = len([r for r in results if "body" in r])
+    axiom_logger.success(
+        "04_BATCH_COMPLETE",
+        f"Generated {successful_count}/{len(contacts)} cold emails successfully",
+        successful=successful_count,
+        total=len(contacts),
+    )
+
     print(f"\n{'='*60}")
-    print(f"Done! {len([r for r in results if 'body' in r])} emails generated.")
+    print(f"Done! {successful_count} emails generated. [Run ID: {run_id}]")
     print(f"Saved to: {OUTPUT_JSON}")
     print(f"{'='*60}\n")
 

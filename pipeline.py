@@ -40,6 +40,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("autoapply.pipeline")
 
+from axiom_logger import get_logger
+axiom_logger = get_logger(service="pipeline")
+
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR            = Path(__file__).resolve().parent
@@ -140,19 +143,27 @@ def run_pipeline(
         List of result dicts (one per contact) with keys:
           to_email, to_name, fit_score, subject, body, tailored_tex (optional).
     """
+    run_id = axiom_logger.new_run()
+    axiom_logger.info("00_START", "Starting AutoApply pipeline run", limit=limit, skip_tailor=skip_tailor, min_score=min_score)
+
     print("\n" + "=" * 60)
-    print("  AutoApply Pipeline — Offline Dry-Run")
+    print(f"  AutoApply Pipeline — Offline Dry-Run [Run ID: {run_id}]")
     print("=" * 60)
 
     # Stage 1
     print("\n[Stage 1] Loading candidate profile...")
-    profile = load_candidate_profile()
-    cand_name, candidate_context = build_candidate_context(profile)
-    base_tex = None if skip_tailor else load_base_tex()
+    with axiom_logger.step("01_LOAD_PROFILE", description="Loading candidate profile and structured resume") as step_meta:
+        profile = load_candidate_profile()
+        cand_name, candidate_context = build_candidate_context(profile)
+        base_tex = None if skip_tailor else load_base_tex()
+        step_meta["candidate_name"] = cand_name
+        step_meta["has_base_tex"] = bool(base_tex)
 
     # Stage 2
     print("[Stage 2] Loading HR contacts...")
-    contacts = load_contacts(limit=limit)
+    with axiom_logger.step("02_LOAD_CONTACTS", description="Loading HR contacts from posts file", limit=limit) as step_meta:
+        contacts = load_contacts(limit=limit)
+        step_meta["contacts_count"] = len(contacts)
 
     # Pipeline stage imports
     from pipeline.relevance_scorer import score_fit
@@ -172,19 +183,29 @@ def run_pipeline(
 
         if not hr_email:
             logger.debug(f"  Skipping contact #{i}: no email address.")
+            axiom_logger.warn("02_CONTACT_SKIP", f"Skipping contact #{i}: no email address", index=i, name=hr_name)
             continue
 
         print(f"\n[{i}/{len(contacts)}] {hr_name} <{hr_email}>")
 
         # ── Stage 3: Score relevance ──────────────────────────────────────────
         print("  [Stage 3] Scoring relevance...")
-        fit = score_fit(post_text, profile, hr_title)
-        fit_score = fit.get("fit_score", 0)
-        fit_tier  = fit.get("fit_tier", "unknown")
-        print(f"  → fit_score={fit_score}  tier={fit_tier}")
+        try:
+            with axiom_logger.step("03_SCORE_FIT", description=f"Scoring relevance for {hr_email}", email=hr_email, contact_num=i) as step_meta:
+                fit = score_fit(post_text, profile, hr_title)
+                fit_score = fit.get("fit_score", 0)
+                fit_tier  = fit.get("fit_tier", "unknown")
+                step_meta["fit_score"] = fit_score
+                step_meta["fit_tier"] = fit_tier
+                print(f"  → fit_score={fit_score}  tier={fit_tier}")
+        except Exception as e:
+            logger.warning(f"  Scoring failed for {hr_email}: {e}")
+            fit_score = 0
+            fit_tier = "error"
 
         if fit_score < min_score:
             print(f"  ⚠ Score {fit_score} < threshold {min_score} — skipping.")
+            axiom_logger.info("03_SCORE_FILTERED", f"Contact {hr_email} fit score {fit_score} below threshold {min_score}", email=hr_email, score=fit_score)
             continue
 
         result: dict = {
@@ -199,54 +220,70 @@ def run_pipeline(
         if tailor_resume and base_tex:
             print("  [Stage 4] Tailoring resume...")
             try:
-                tailored_tex = tailor_resume(
-                    base_tex=base_tex,
-                    post_text=post_text,
-                    hr_title=hr_title,
-                    to_email=hr_email,
-                    feedback="",
-                    cand_name=cand_name,
-                    model=model,
-                )
-                result["tailored_tex"] = tailored_tex
-                print(f"  → Tailored LaTeX: {len(tailored_tex)} chars")
+                with axiom_logger.step("04_TAILOR_RESUME", description=f"Tailoring LaTeX resume for {hr_email}", email=hr_email) as step_meta:
+                    tailored_tex = tailor_resume(
+                        base_tex=base_tex,
+                        post_text=post_text,
+                        hr_title=hr_title,
+                        to_email=hr_email,
+                        feedback="",
+                        cand_name=cand_name,
+                        model=model,
+                    )
+                    result["tailored_tex"] = tailored_tex
+                    step_meta["tex_length"] = len(tailored_tex)
+                    print(f"  → Tailored LaTeX: {len(tailored_tex)} chars")
             except Exception as e:
                 logger.warning(f"  Resume tailoring failed: {e}")
+                axiom_logger.warn("04_TAILOR_RESUME_FAILED", f"Resume tailoring failed for {hr_email}: {e}", email=hr_email, error=str(e))
         else:
             print("  [Stage 4] Resume tailoring skipped.")
 
         # ── Stage 5: Draft email ──────────────────────────────────────────────
         print("  [Stage 5] Drafting email...")
         try:
-            draft = draft_email(
-                hr_name=hr_name,
-                hr_title=hr_title,
-                hr_email=hr_email,
-                post_text=post_text,
-                candidate_context=candidate_context,
-                cand_name=cand_name,
-                model=model,
-            )
-            result["subject"] = draft["subject"]
-            result["body"]    = draft["body"]
-            print(f"  → Subject: {draft['subject']}")
-            print(f"  → Preview: {draft['body'][:100].replace(chr(10), ' ')}...")
+            with axiom_logger.step("05_DRAFT_EMAIL", description=f"Drafting cold email for {hr_email}", email=hr_email) as step_meta:
+                draft = draft_email(
+                    hr_name=hr_name,
+                    hr_title=hr_title,
+                    hr_email=hr_email,
+                    post_text=post_text,
+                    candidate_context=candidate_context,
+                    cand_name=cand_name,
+                    model=model,
+                )
+                result["subject"] = draft["subject"]
+                result["body"]    = draft["body"]
+                step_meta["subject"] = draft["subject"]
+                step_meta["body_len"] = len(draft["body"])
+                print(f"  → Subject: {draft['subject']}")
+                print(f"  → Preview: {draft['body'][:100].replace(chr(10), ' ')}...")
         except Exception as e:
             logger.warning(f"  Email drafting failed: {e}")
             result["error"] = str(e)
+            axiom_logger.error("05_DRAFT_EMAIL_FAILED", f"Email drafting failed for {hr_email}: {e}", email=hr_email, error=str(e))
 
         results.append(result)
 
     # ── Stage 6: Write output ─────────────────────────────────────────────────
     print(f"\n[Stage 6] Writing {len(results)} results to {COLD_EMAILS_OUTPUT} ...")
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    COLD_EMAILS_OUTPUT.write_text(
-        json.dumps(results, indent=2, ensure_ascii=False),
-        encoding="utf-8"
+    with axiom_logger.step("06_WRITE_OUTPUT", description="Writing generated drafts to JSON file", drafted_count=len(results)) as step_meta:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        COLD_EMAILS_OUTPUT.write_text(
+            json.dumps(results, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        step_meta["file"] = str(COLD_EMAILS_OUTPUT)
+
+    axiom_logger.success(
+        "07_PIPELINE_COMPLETE",
+        f"Pipeline run completed successfully. Drafted {len(results)} emails.",
+        total_drafted=len(results),
+        min_score=min_score,
     )
 
     print("\n" + "=" * 60)
-    print(f"  Done! {len(results)} emails drafted.")
+    print(f"  Done! {len(results)} emails drafted. [Run ID: {run_id}]")
     if min_score:
         print(f"  (Only contacts with fit_score >= {min_score} were processed.)")
     print(f"  Output: {COLD_EMAILS_OUTPUT}")

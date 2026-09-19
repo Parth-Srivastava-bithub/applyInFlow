@@ -16,7 +16,9 @@ from playwright.async_api import async_playwright, Page
 
 from pipeline.name_cleaner import clean_name
 from config import JUNK_EMAIL_ADDRESSES as JUNK_EMAILS
+from axiom_logger import get_logger
 
+axiom_logger = get_logger(service="linkedin_posts_scraper")
 logger = logging.getLogger("linkedin_posts_scraper")
 
 GMAIL_RE = re.compile(r'\b[A-Za-z0-9._%+\-]+@gmail\.com\b', re.I)
@@ -199,80 +201,89 @@ async def scrape_posts(
         if (r.get("hr_email") or r.get("gmail"))
     }
 
+    axiom_logger.info("00_SCRAPE_START", "Starting LinkedIn posts scraping run", queries_count=len(queries), max_per_query=max_posts_per_query)
+
     for query in queries:
         encoded = quote_plus(query)
         url = f"https://www.linkedin.com/search/results/content/?keywords={encoded}&origin=GLOBAL_SEARCH_HEADER"
 
         logger.info(f"\nSearching posts: '{query}'")
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-        except Exception as e:
-            logger.warning(f"Navigation failed for '{query}': {e}")
-            continue
-
-        await asyncio.sleep(3.0)
-
-        collected = 0
-        last_height = 0
-        scrolls_without_new = 0
-
-        while collected < max_posts_per_query and scrolls_without_new < 4:
-            posts_data = await page.evaluate(JS_EXTRACT)
-
-            new_found = 0
-            for post in posts_data:
-                key = post.get("key", "")
-                if not key or key in seen:
+            with axiom_logger.step("SCRAPE_QUERY", description=f"Scraping posts for query: {query}", query=query) as step_meta:
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                except Exception as e:
+                    logger.warning(f"Navigation failed for '{query}': {e}")
+                    axiom_logger.warn("SCRAPE_NAV_WARN", f"Navigation failed for '{query}': {e}", query=query, error=str(e))
                     continue
 
-                gmail    = post.get("gmail")
-                hr_email = post.get("email")
-                # Skip invalid emails, plus-aliases, or junk template emails
-                if not hr_email or hr_email[0] in ('-', '.', '_', '+') or '+' in hr_email.split('@')[0] or hr_email in JUNK_EMAILS:
-                    seen.add(key)
-                    continue
+                await asyncio.sleep(3.0)
 
-                email_clean = hr_email.lower()
-                if email_clean in existing_emails:
-                    seen.add(key)
-                    continue
-
-                existing_emails.add(email_clean)
-                record = {
-                    "name":         clean_name(post.get("name") or "Unknown"),
-                    "title":        post.get("title") or "",
-                    "linkedin_url": post.get("profile_url") or "",
-                    "post_text":    post.get("post_text", "")[:600],
-                    "gmail":        gmail,
-                    "hr_email":     hr_email,
-                    "query":        query,
-                }
-                seen.add(key)
-                all_records.append(record)
-                collected += 1
-                new_found += 1
-                logger.info(f"  [FOUND] {record['name']} | {gmail or hr_email}")
-
-            save_seen(seen, SEEN_POSTS)
-            save_records(all_records, POSTS_JSON)
-
-            if new_found == 0:
-                scrolls_without_new += 1
-            else:
+                collected = 0
+                last_height = 0
                 scrolls_without_new = 0
 
-            if collected >= max_posts_per_query:
-                break
+                while collected < max_posts_per_query and scrolls_without_new < 4:
+                    posts_data = await page.evaluate(JS_EXTRACT)
 
-            new_height = await page.evaluate("document.body.scrollHeight")
-            if new_height == last_height:
-                scrolls_without_new += 1
-            last_height = new_height
-            await page.evaluate("window.scrollBy(0, 1200);")
-            await asyncio.sleep(random.uniform(min_delay, max_delay))
+                    new_found = 0
+                    for post in posts_data:
+                        key = post.get("key", "")
+                        if not key or key in seen:
+                            continue
 
-        logger.info(f"Query '{query}': collected {collected} posts with emails.")
+                        gmail    = post.get("gmail")
+                        hr_email = post.get("email")
+                        # Skip invalid emails, plus-aliases, or junk template emails
+                        if not hr_email or hr_email[0] in ('-', '.', '_', '+') or '+' in hr_email.split('@')[0] or hr_email in JUNK_EMAILS:
+                            seen.add(key)
+                            continue
 
+                        email_clean = hr_email.lower()
+                        if email_clean in existing_emails:
+                            seen.add(key)
+                            continue
+
+                        existing_emails.add(email_clean)
+                        record = {
+                            "name":         clean_name(post.get("name") or "Unknown"),
+                            "title":        post.get("title") or "",
+                            "linkedin_url": post.get("profile_url") or "",
+                            "post_text":    post.get("post_text", "")[:600],
+                            "gmail":        gmail,
+                            "hr_email":     hr_email,
+                            "query":        query,
+                        }
+                        seen.add(key)
+                        all_records.append(record)
+                        collected += 1
+                        new_found += 1
+                        logger.info(f"  [FOUND] {record['name']} | {gmail or hr_email}")
+
+                    save_seen(seen, SEEN_POSTS)
+                    save_records(all_records, POSTS_JSON)
+
+                    if new_found == 0:
+                        scrolls_without_new += 1
+                    else:
+                        scrolls_without_new = 0
+
+                    if collected >= max_posts_per_query:
+                        break
+
+                    new_height = await page.evaluate("document.body.scrollHeight")
+                    if new_height == last_height:
+                        scrolls_without_new += 1
+                    last_height = new_height
+                    await page.evaluate("window.scrollBy(0, 1200);")
+                    await asyncio.sleep(random.uniform(min_delay, max_delay))
+
+                step_meta["collected_emails"] = collected
+                logger.info(f"Query '{query}': collected {collected} posts with emails.")
+        except Exception as query_err:
+            axiom_logger.error("SCRAPE_QUERY_ERROR", f"Error during query execution '{query}': {query_err}", query=query, error=str(query_err))
+
+    axiom_logger.success("SCRAPE_COMPLETE", f"Finished posts scraping. Total records collected: {len(all_records)}", total_records=len(all_records))
     return all_records
 
 

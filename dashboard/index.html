@@ -1169,7 +1169,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       width: 100%;
     }
     .dropdown-group {
@@ -1342,10 +1342,7 @@
       top: 65px;
       max-height: calc(100vh - 85px);
     }
-    @media (max-width: 1150px) {
-      .content-body-grid { flex-direction: column-reverse; }
-      .contacts-sidebar-col { width: 100%; position: static; max-height: 520px; }
-    }
+
 
     /* Right Sidebar Toggle Bar */
     .sidebar-tab-toggle {
@@ -1624,18 +1621,418 @@
       padding: 10px 16px; border-radius: var(--radius-md); font-size: 12.5px; color: #ffffff;
       box-shadow: 0 4px 16px rgba(0,0,0,0.25);
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       RESPONSIVE & MOBILE / LAPTOP INTERACTIVITY DESIGN SYSTEM
+       ═══════════════════════════════════════════════════════════════ */
+    
+    /* Backdrop for off-canvas mobile drawer */
+    .sidebar-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(4px);
+      z-index: 85;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .sidebar-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .top-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .hamburger-menu-btn {
+      display: none;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      border-radius: var(--radius-md);
+      width: 36px;
+      height: 36px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+      box-shadow: var(--shadow-sm);
+    }
+    .hamburger-menu-btn:hover {
+      background: var(--primary-soft);
+      border-color: var(--primary-border);
+      color: var(--primary);
+    }
+
+    .mobile-sidebar-close-btn {
+      display: none;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      font-size: 14px;
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transition: background 0.15s ease;
+    }
+    .mobile-sidebar-close-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .header-brand-mobile {
+      display: none;
+      align-items: center;
+      gap: 7px;
+      font-weight: 800;
+      font-size: 16px;
+      color: var(--text-main);
+      letter-spacing: -0.3px;
+      white-space: nowrap;
+    }
+
+    /* Mobile View Tabs (Switch between Steps & Contacts) */
+    .mobile-view-tabs {
+      display: none;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      padding: 4px;
+      gap: 6px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-sm);
+      position: sticky;
+      top: 56px;
+      z-index: 25;
+    }
+    .mobile-tab-btn {
+      flex: 1;
+      padding: 9px 12px;
+      font-size: 12.5px;
+      font-weight: 700;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: inherit;
+    }
+    .mobile-tab-btn.active {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+    }
+
+    [data-theme="dark"] .hamburger-menu-btn {
+      background: #1e293b;
+      border-color: #334155;
+      color: #f8fafc;
+    }
+    [data-theme="dark"] .hamburger-menu-btn:hover {
+      background: #334155;
+      color: #60a5fa;
+    }
+    [data-theme="dark"] .header-brand-mobile {
+      color: #ffffff;
+    }
+    [data-theme="dark"] .mobile-view-tabs {
+      background: #111827;
+      border-color: #1f2937;
+    }
+    [data-theme="dark"] .mobile-tab-btn {
+      color: #94a3b8;
+    }
+    [data-theme="dark"] .mobile-tab-btn.active {
+      background: #2563eb;
+      color: #ffffff;
+    }
+
+    /* ── Breakpoint: Laptops & Medium Desktops (max-width: 1280px) ── */
+    @media (max-width: 1280px) {
+      .nav-sidebar {
+        width: 210px;
+        padding: 18px 12px 14px;
+      }
+      .content-body-grid {
+        padding: 16px 18px 50px;
+        gap: 16px;
+      }
+      .contacts-sidebar-col {
+        width: 290px;
+      }
+      .metric-cards-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) repeat(2, minmax(0, 1fr));
+      }
+      .global-search-wrap {
+        width: 300px;
+      }
+    }
+
+    /* ── Breakpoint: Tablets & Small Laptops (max-width: 1023px) ── */
+    @media (max-width: 1023px) {
+      .dashboard-layout {
+        position: relative;
+        overflow-x: hidden;
+      }
+      .nav-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 280px;
+        height: 100vh;
+        z-index: 90;
+        transform: translateX(-100%);
+        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      }
+      .nav-sidebar.open {
+        transform: translateX(0);
+      }
+      .hamburger-menu-btn {
+        display: inline-flex;
+      }
+      .mobile-sidebar-close-btn {
+        display: inline-flex;
+      }
+      .mobile-view-tabs {
+        display: flex;
+      }
+      .content-body-grid {
+        flex-direction: column;
+        padding: 12px 14px 40px;
+        gap: 14px;
+      }
+      .contacts-sidebar-col {
+        display: none;
+        width: 100%;
+        position: static;
+        max-height: none;
+        min-height: 520px;
+      }
+      .metric-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      .metric-quote-card {
+        grid-column: span 2;
+      }
+      .modal-split-body {
+        flex-direction: column;
+        overflow-y: auto;
+      }
+      .modal-pdf-col {
+        border-right: none;
+        border-bottom: 1px solid var(--card-border);
+        min-height: 350px;
+      }
+    }
+
+    /* ── Breakpoint: Mobile Devices (max-width: 768px) ── */
+    @media (max-width: 768px) {
+      body {
+        font-size: 13px;
+      }
+      .top-header {
+        padding: 10px 14px;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-header-left {
+        width: 100%;
+        justify-content: space-between;
+      }
+      .header-brand-mobile {
+        display: inline-flex;
+      }
+      .global-search-wrap {
+        width: 100%;
+        max-width: 100%;
+        order: 3;
+        padding: 6px 12px;
+      }
+      .top-header-right {
+        width: 100%;
+        justify-content: flex-end;
+        gap: 6px;
+        order: 2;
+      }
+      .kbd-badge {
+        display: none;
+      }
+      #db-status-badge, #user-quota-badge {
+        font-size: 10px;
+        padding: 3px 8px;
+      }
+      .hero-banner-card {
+        padding: 16px 14px 14px;
+        gap: 12px;
+      }
+      .hero-title {
+        font-size: 18px;
+      }
+      .hero-subtitle {
+        font-size: 12px;
+      }
+      .step-card {
+        padding: 14px 14px;
+        gap: 12px;
+      }
+      .topic-search-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .topic-search-row .btn {
+        width: 100%;
+        padding: 9px 14px;
+      }
+      .search-values-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+      .resume-attach-box {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 12px;
+      }
+      .resume-attach-box > div:last-child {
+        width: 100%;
+        display: flex;
+        gap: 8px;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+      .controls-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .dropdown-group {
+        width: 100%;
+        justify-content: space-between;
+      }
+      .dropdown-group select {
+        flex: 1;
+        max-width: 60%;
+      }
+      .controls-actions {
+        width: 100%;
+        margin-left: 0;
+        justify-content: space-between;
+      }
+      .controls-actions .btn {
+        flex: 1;
+        padding: 8px 10px;
+      }
+      .drafts-toolbar-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .draft-card {
+        padding: 12px;
+      }
+      .draft-card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+      .draft-card-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .draft-card-footer > div {
+        width: 100%;
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      .btn {
+        min-height: 38px;
+      }
+      .modal {
+        width: 95vw;
+        padding: 16px 14px;
+        margin: 10px;
+      }
+      .modal-tailor-dialog {
+        width: 96vw;
+        height: 94vh;
+        max-height: 94vh;
+      }
+      .contacts-actions-row {
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .contacts-actions-row .btn {
+        flex: 1;
+        min-width: 75px;
+        padding: 6px 8px;
+      }
+    }
+
+    /* ── Breakpoint: Small Mobile Screens (max-width: 480px) ── */
+    @media (max-width: 480px) {
+      .metric-cards-grid {
+        grid-template-columns: 1fr;
+      }
+      .metric-quote-card {
+        grid-column: auto;
+      }
+      #db-status-text {
+        display: none;
+      }
+      #user-quota-badge {
+        display: none;
+      }
+      .btn-text-hide-mobile {
+        display: none;
+      }
+      .top-safety-banner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+    }
   </style>
 </head>
 <body>
 
   <div class="dashboard-layout">
 
+    <!-- Mobile Navigation Drawer Backdrop -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleMobileSidebar(false)"></div>
+
     <!-- ── LEFT NAVIGATION SIDEBAR ── -->
     <aside class="nav-sidebar">
       <div class="brand-header">
-        <div class="brand-title">
-          <span class="brand-plane-icon">✈</span>
-          <span>AutoApply</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+          <div class="brand-title">
+            <span class="brand-plane-icon">✈</span>
+            <span>AutoApply</span>
+          </div>
+          <button class="mobile-sidebar-close-btn" onclick="toggleMobileSidebar(false)" aria-label="Close navigation drawer">✕</button>
         </div>
         <div class="brand-tagline">Find opportunities.<br/>Send with confidence.</div>
       </div>
@@ -1716,10 +2113,19 @@
 
       <!-- TOP HEADER BAR -->
       <header class="top-header">
-        <div class="global-search-wrap">
-          <span style="color:#94a3b8; font-size:12px;">🔍</span>
-          <input type="text" class="global-search-input" placeholder="Search companies, roles, or keywords..." id="global-search-input" oninput="onGlobalSearch(this.value)" />
-          <span class="kbd-badge">Ctrl K</span>
+        <div class="top-header-left">
+          <button class="hamburger-menu-btn" id="hamburger-menu-btn" onclick="toggleMobileSidebar(true)" aria-label="Open Navigation Menu">
+            <span>☰</span>
+          </button>
+          <div class="header-brand-mobile">
+            <span class="brand-plane-icon" style="color:#60a5fa;">✈</span>
+            <span>AutoApply</span>
+          </div>
+          <div class="global-search-wrap">
+            <span style="color:#94a3b8; font-size:12px;">🔍</span>
+            <input type="text" class="global-search-input" placeholder="Search companies, roles, or keywords..." id="global-search-input" oninput="onGlobalSearch(this.value)" />
+            <span class="kbd-badge">Ctrl K</span>
+          </div>
         </div>
 
         <div class="top-header-right">
@@ -1735,7 +2141,7 @@
           <div id="clerk-auth-container" style="display:flex; align-items:center; gap:8px;">
             <div id="clerk-user-button"></div>
             <button class="btn btn-primary-blue btn-xs" id="clerk-signin-btn" onclick="openClerkAuth()" style="display:inline-flex; align-items:center; gap:5px;">
-              <span>🔐</span> Sign In
+              <span>🔐</span> <span class="btn-text-hide-mobile">Sign In</span>
             </button>
             <div id="user-session-pill" style="display:none; align-items:center; gap:6px; background:var(--card-bg); border:1px solid var(--card-border); padding:3px 8px; border-radius:8px;">
               <span id="header-user-badge" style="font-size:12px; font-weight:700; color:var(--text-main);"></span>
@@ -1748,6 +2154,16 @@
 
       <!-- CONTENT BODY GRID -->
       <div class="content-body-grid">
+
+        <!-- Mobile View Switcher (Visible on tablets & mobile screens < 1024px) -->
+        <div class="mobile-view-tabs" id="mobile-view-tabs">
+          <button class="mobile-tab-btn active" id="btn-mobile-workflow" onclick="setMobileActiveView('workflow')">
+            <span>⚡</span> Workflow Steps
+          </button>
+          <button class="mobile-tab-btn" id="btn-mobile-contacts" onclick="setMobileActiveView('contacts')">
+            <span>👥</span> Leads & Contacts (<span id="mobile-contacts-badge">0</span>)
+          </button>
+        </div>
 
         <!-- WORKFLOW COLUMN -->
         <div class="workflow-column">
@@ -2946,6 +3362,8 @@
         document.getElementById('metric-pending-count').textContent = contacts.length;
         document.getElementById('metric-sent-count').textContent = sentEmails.length;
         document.getElementById('metric-leads-count').textContent = contacts.length + sentEmails.length;
+        const mobBadge = document.getElementById('mobile-contacts-badge');
+        if (mobBadge) mobBadge.textContent = contacts.length;
 
         renderContacts();
       } catch (e) {}
@@ -2957,6 +3375,9 @@
       document.getElementById('tab-sent').classList.toggle('active', view === 'sent');
       document.getElementById('contact-search').placeholder = view === 'pending' ? 'Search pending emails...' : 'Search sent emails...';
       document.getElementById('btn-clear-contacts').style.display = view === 'pending' ? 'inline-flex' : 'none';
+      if (window.innerWidth < 1024) {
+        setMobileActiveView('contacts');
+      }
       renderContacts();
     }
 
@@ -3314,7 +3735,7 @@
                 <button class="btn btn-light-gray btn-xs" onclick="regenerateDraft(${idx})">
                   🔄 Re-draft
                 </button>
-                <button class="btn btn-green-soft btn-xs" onclick="sendSingleDraft(${idx})">
+                <button class="btn btn-green-soft btn-xs btn-send-action" id="btn-send-${idx}" onclick="sendSingleDraft(${idx})">
                   ✉ Send
                 </button>
               </div>
@@ -3840,6 +4261,65 @@
     function esc(s) {
       return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
+
+    /* ── Responsive Mobile & Tablet Navigation / View Controls ── */
+    function toggleMobileSidebar(open) {
+      const sidebar = document.querySelector('.nav-sidebar');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      if (!sidebar) return;
+      const willOpen = (open !== undefined) ? open : !sidebar.classList.contains('open');
+      sidebar.classList.toggle('open', willOpen);
+      if (backdrop) backdrop.classList.toggle('open', willOpen);
+      document.body.style.overflow = willOpen ? 'hidden' : '';
+    }
+
+    function setMobileActiveView(view) {
+      const workflowCol = document.querySelector('.workflow-column');
+      const contactsCol = document.querySelector('.contacts-sidebar-col');
+      const btnWorkflow = document.getElementById('btn-mobile-workflow');
+      const btnContacts = document.getElementById('btn-mobile-contacts');
+
+      if (btnWorkflow) btnWorkflow.classList.toggle('active', view === 'workflow');
+      if (btnContacts) btnContacts.classList.toggle('active', view === 'contacts');
+
+      if (window.innerWidth < 1024) {
+        if (workflowCol && contactsCol) {
+          if (view === 'workflow') {
+            workflowCol.style.display = 'flex';
+            contactsCol.style.display = 'none';
+          } else {
+            workflowCol.style.display = 'none';
+            contactsCol.style.display = 'flex';
+            contactsCol.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+      }
+    }
+
+    // Auto-close mobile drawer when any navigation link or action is clicked
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.nav-sidebar .nav-item').forEach(link => {
+        link.addEventListener('click', () => {
+          if (window.innerWidth < 1024) {
+            toggleMobileSidebar(false);
+          }
+        });
+      });
+    });
+
+    // Handle screen resize across 1024px boundary
+    window.addEventListener('resize', () => {
+      const workflowCol = document.querySelector('.workflow-column');
+      const contactsCol = document.querySelector('.contacts-sidebar-col');
+      if (window.innerWidth >= 1024) {
+        if (workflowCol) workflowCol.style.display = 'flex';
+        if (contactsCol) contactsCol.style.display = 'flex';
+        toggleMobileSidebar(false);
+      } else {
+        const isContactsActive = document.getElementById('btn-mobile-contacts')?.classList.contains('active');
+        setMobileActiveView(isContactsActive ? 'contacts' : 'workflow');
+      }
+    });
 
     init();
   </script>
