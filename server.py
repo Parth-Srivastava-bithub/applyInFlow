@@ -261,6 +261,7 @@ def load_profile(username: Optional[str] = None) -> dict:
         "resume_filename": "",
         "groq_api_key": "",
         "openai_api_key": "",
+        "resend_api_key": "",
     }
     if not username:
         return default
@@ -291,6 +292,8 @@ def load_profile(username: Optional[str] = None) -> dict:
             res["groq_api_key"] = os.getenv("GROQ_API_KEY", "")
         if not res.get("openai_api_key"):
             res["openai_api_key"] = os.getenv("OPENAI_API_KEY", "")
+        if not res.get("resend_api_key"):
+            res["resend_api_key"] = os.getenv("RESEND_API_KEY", "")
     return res
 
 
@@ -603,6 +606,10 @@ def save_profile_route():
         env_updates["GMAIL_SENDER"] = (data["gmail_sender"] or "").strip()
     if "gmail_app_password" in data and u in OWNER_ALIASES:
         env_updates["GMAIL_APP_PASSWORD"] = (data["gmail_app_password"] or "").strip()
+    if "resend_api_key" in data and u in OWNER_ALIASES:
+        resend_val = (data["resend_api_key"] or "").strip()
+        os.environ["RESEND_API_KEY"] = resend_val
+        env_updates["RESEND_API_KEY"] = resend_val
 
     if env_updates:
         try:
@@ -1231,23 +1238,64 @@ def generate_email():
 
 
 
+class IPv4SMTP_SSL(smtplib.SMTP_SSL):
+    def _get_socket(self, host, port, timeout):
+        addr_list = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        last_err = None
+        for af, socktype, proto, canonname, sa in addr_list:
+            s = None
+            try:
+                s = socket.socket(af, socktype, proto)
+                s.settimeout(timeout)
+                s.connect(sa)
+                import ssl
+                ctx = ssl.create_default_context()
+                return ctx.wrap_socket(s, server_hostname=host)
+            except Exception as e:
+                last_err = e
+                if s:
+                    s.close()
+        if last_err:
+            raise last_err
+        raise OSError(f"Could not connect via IPv4 to {host}:{port}")
+
+
+class IPv4SMTP(smtplib.SMTP):
+    def _get_socket(self, host, port, timeout):
+        addr_list = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        last_err = None
+        for af, socktype, proto, canonname, sa in addr_list:
+            s = None
+            try:
+                s = socket.socket(af, socktype, proto)
+                s.settimeout(timeout)
+                s.connect(sa)
+                return s
+            except Exception as e:
+                last_err = e
+                if s:
+                    s.close()
+        if last_err:
+            raise last_err
+        raise OSError(f"Could not connect via IPv4 to {host}:{port}")
+
+
 def send_smtp_email(sender: str, password: str, to_email: str, msg_str: str, timeout: int = 15) -> None:
     """
-    Sends an email using Gmail SMTP with strict socket timeouts and port fallback.
-    Tries port 465 (SSL) first with timeout=15s. If it times out or fails to connect
-    (common on cloud container networks like Railway), falls back to port 587 (STARTTLS).
+    Sends an email using Gmail SMTP with strict IPv4 socket binding, timeouts, and port fallback.
+    Tries port 465 (SSL) first with timeout=15s. If it fails or times out, falls back to port 587 (STARTTLS).
     """
     last_err = None
 
-    # Attempt 1: Port 465 (SSL)
+    # Attempt 1: Port 465 (SSL via IPv4)
     try:
         axiom_logger.info(
             "SMTP_ATTEMPT",
-            f"Attempting Gmail SMTP connection on port 465 (timeout={timeout}s)...",
+            f"Attempting Gmail SMTP connection on port 465 via IPv4 (timeout={timeout}s)...",
             port=465,
             recipient=to_email
         )
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=timeout) as smtp:
+        with IPv4SMTP_SSL("smtp.gmail.com", 465, timeout=timeout) as smtp:
             smtp.login(sender, password)
             smtp.sendmail(sender, to_email, msg_str)
             axiom_logger.info(
@@ -1261,21 +1309,21 @@ def send_smtp_email(sender: str, password: str, to_email: str, msg_str: str, tim
         last_err = e
         axiom_logger.warning(
             "SMTP_PORT_465_FAILED",
-            f"SMTP on port 465 failed or timed out: {e}. Falling back to port 587 (STARTTLS)...",
+            f"SMTP on port 465 failed: {e}. Falling back to port 587 (STARTTLS)...",
             port=465,
             recipient=to_email,
             error=str(e)
         )
 
-    # Attempt 2: Port 587 (STARTTLS)
+    # Attempt 2: Port 587 (STARTTLS via IPv4)
     try:
         axiom_logger.info(
             "SMTP_ATTEMPT",
-            f"Attempting Gmail SMTP connection on port 587 (STARTTLS, timeout={timeout}s)...",
+            f"Attempting Gmail SMTP connection on port 587 via IPv4 (STARTTLS, timeout={timeout}s)...",
             port=587,
             recipient=to_email
         )
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=timeout) as smtp:
+        with IPv4SMTP("smtp.gmail.com", 587, timeout=timeout) as smtp:
             smtp.ehlo()
             smtp.starttls()
             smtp.ehlo()
@@ -1300,6 +1348,48 @@ def send_smtp_email(sender: str, password: str, to_email: str, msg_str: str, tim
         raise RuntimeError(f"Failed to send email via SMTP (tried ports 465 & 587): {last_err}") from last_err
 
 
+def send_via_resend(api_key: str, sender: str, sender_name: str, to_email: str, subject: str, body: str, attachment_path: Optional[Path] = None, attachment_name: str = "Resume.pdf") -> dict:
+    """
+    Sends email via Resend HTTPS REST API (Port 443 — 100% allowed on all cloud platforms including Railway).
+    Sets reply_to to candidate's Gmail so all recruiter responses arrive in the candidate's personal inbox.
+    """
+    import base64
+    from_header = f"{sender_name} <onboarding@resend.dev>" if "@gmail.com" in (sender or "").lower() else f"{sender_name} <{sender}>"
+    payload = {
+        "from": from_header,
+        "to": [to_email],
+        "reply_to": sender or None,
+        "subject": subject,
+        "text": body,
+    }
+    if attachment_path and attachment_path.exists():
+        with open(attachment_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        payload["attachments"] = [{
+            "filename": attachment_name,
+            "content": b64
+        }]
+
+    resp = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=15
+    )
+    if resp.status_code >= 400:
+        err_msg = resp.text
+        try:
+            err_json = resp.json()
+            err_msg = err_json.get("message") or str(err_json)
+        except Exception:
+            pass
+        raise RuntimeError(f"Resend API error ({resp.status_code}): {err_msg}")
+    return resp.json()
+
+
 
 @app.route("/api/send", methods=["POST"])
 def send_email():
@@ -1315,9 +1405,10 @@ def send_email():
     sender   = (profile.get("gmail_sender") or "").strip()
     password = (profile.get("gmail_app_password") or "").strip().replace(" ", "")
     resume_fn = profile.get("resume_filename", "")
+    resend_key = (profile.get("resend_api_key") or os.getenv("RESEND_API_KEY") or "").strip()
 
-    if not sender or not password:
-        return jsonify({"error": "Gmail sender and app password not set in Settings"}), 400
+    if not resend_key and (not sender or not password):
+        return jsonify({"error": "Gmail credentials or Resend API key not set in Settings"}), 400
     if not to_email:
         return jsonify({"error": "No recipient email"}), 400
 
@@ -1340,10 +1431,14 @@ def send_email():
 
             tailored_fn = data.get("tailored_resume_filename") or ""
             attached_resume = False
+            resume_path_to_send = None
+            resume_name_to_send = "Resume.pdf"
 
             if tailored_fn:
                 tailored_path = TAILORED_RESUMES_DIR / secure_filename(tailored_fn)
                 if tailored_path.exists():
+                    resume_path_to_send = tailored_path
+                    resume_name_to_send = "Parth_Srivastava_Resume.pdf"
                     with open(tailored_path, "rb") as f:
                         part = MIMEApplication(f.read(), Name="Parth_Srivastava_Resume.pdf")
                     part['Content-Disposition'] = 'attachment; filename="Parth_Srivastava_Resume.pdf"'
@@ -1353,12 +1448,30 @@ def send_email():
             if not attached_resume and resume_fn:
                 resume_path = RESUME_DIR / resume_fn
                 if resume_path.exists():
+                    resume_path_to_send = resume_path
+                    resume_name_to_send = resume_fn
                     with open(resume_path, "rb") as f:
                         part = MIMEApplication(f.read(), Name=resume_fn)
                     part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
                     msg.attach(part)
+                    attached_resume = True
 
-            send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
+            # Send via Resend HTTPS API if available, or direct Gmail IPv4 SMTP
+            if resend_key:
+                axiom_logger.info("RESEND_ATTEMPT", f"Sending cold email via Resend HTTPS API to {to_email}...", recipient=to_email)
+                send_via_resend(
+                    api_key=resend_key,
+                    sender=sender or "onboarding@resend.dev",
+                    sender_name=profile.get("name") or "Applicant",
+                    to_email=to_email,
+                    subject=subject,
+                    body=body,
+                    attachment_path=resume_path_to_send,
+                    attachment_name=resume_name_to_send
+                )
+                axiom_logger.info("RESEND_SUCCESS", f"Email delivered via Resend API to {to_email}", recipient=to_email)
+            else:
+                send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
 
             step_meta["attached_resume"] = attached_resume
             step_meta["subject"] = subject
@@ -1388,8 +1501,15 @@ def send_email():
 
             return jsonify({"ok": True, "message": f"Email sent to {to_email}"})
     except Exception as e:
-        axiom_logger.error("SEND_EMAIL_FAILED", f"Failed to send email to {to_email}: {e}", recipient=to_email, error=str(e), username=u)
-        return jsonify({"error": str(e)}), 500
+        err_msg = str(e)
+        if "101" in err_msg or "Network is unreachable" in err_msg or "Connection refused" in err_msg:
+            err_msg = (
+                "Railway cloud blocks outbound SMTP (ports 465/587). "
+                "To send emails from Railway without port restrictions, add a free Resend API key (resend.com) in Settings or RESEND_API_KEY in Railway Variables, "
+                "or enable Outbound IPv6 in Railway Settings > Networking."
+            )
+        axiom_logger.error("SEND_EMAIL_FAILED", f"Failed to send email to {to_email}: {err_msg}", recipient=to_email, error=err_msg, raw_error=str(e), username=u)
+        return jsonify({"error": err_msg}), 500
     finally:
         with SEND_LOCK:
             IN_FLIGHT_SENDS.discard(clean_to)

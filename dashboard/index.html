@@ -2530,6 +2530,12 @@
         <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">Gmail App Password</label>
         <input id="s-pwd" class="form-input" style="width:100%" type="password" placeholder="16-character App Password" />
       </div>
+      <div style="margin-bottom:10px;">
+        <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">
+          Resend API Key <span style="font-size:10.5px; font-weight:400; color:var(--accent-blue);">(Recommended on Railway to bypass blocked SMTP ports)</span>
+        </label>
+        <input id="s-resend-key" class="form-input" style="width:100%; font-family:'Fira Code', monospace; font-size:11px;" type="password" placeholder="re_..." />
+      </div>
 
       <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin:16px 0 8px; border-bottom:1px solid var(--card-border); padding-bottom:4px;">
         AI API Keys
@@ -4200,6 +4206,7 @@
       document.getElementById('s-pwd').value = profile.gmail_app_password || '';
       document.getElementById('s-groq-key').value = profile.groq_api_key || '';
       document.getElementById('s-openai-key').value = profile.openai_api_key || '';
+      document.getElementById('s-resend-key').value = profile.resend_api_key || '';
       document.getElementById('settings-modal').classList.add('open');
     }
 
@@ -4215,6 +4222,7 @@
         gmail_app_password: document.getElementById('s-pwd').value.trim(),
         groq_api_key: document.getElementById('s-groq-key').value.trim(),
         openai_api_key: document.getElementById('s-openai-key').value.trim(),
+        resend_api_key: document.getElementById('s-resend-key').value.trim(),
       };
       await apiFetch('/api/profile', {
         method: 'POST',
