@@ -13,6 +13,8 @@ import logging
 import os
 import re
 import smtplib
+import socket
+import ssl
 from collections import deque
 from datetime import datetime, timezone
 from email.mime.application import MIMEApplication
@@ -1521,33 +1523,48 @@ def send_email():
 
             # Send via Resend HTTPS API if available, or direct Gmail IPv4 SMTP
             resend_quota = None
+            sent_via_resend_ok = False
             if resend_key:
-                axiom_logger.info("RESEND_ATTEMPT", f"Sending cold email via Resend HTTPS API to {to_email}...", recipient=to_email)
-                resend_resp = send_via_resend(
-                    api_key=resend_key,
-                    sender=sender or "onboarding@resend.dev",
-                    sender_name=profile.get("name") or "Applicant",
-                    to_email=to_email,
-                    subject=subject,
-                    body=body,
-                    attachment_path=resume_path_to_send,
-                    attachment_name=resume_name_to_send,
-                    from_email=resend_from
-                )
-                resend_quota = parse_resend_quota(resend_resp)
-                daily_rem = resend_quota.get("daily_remaining")
-                monthly_rem = resend_quota.get("monthly_remaining")
-                axiom_logger.info(
-                    "RESEND_SUCCESS",
-                    f"Email delivered via Resend API to {to_email}. Quota remaining: {daily_rem}/100 today, {monthly_rem}/3000 month",
-                    recipient=to_email,
-                    resend_quota=resend_quota
-                )
                 try:
-                    save_user_profile({"resend_quota": resend_quota}, username=u)
-                except Exception as save_q_err:
-                    logging.warning(f"Could not persist resend quota for {u}: {save_q_err}")
-            else:
+                    axiom_logger.info("RESEND_ATTEMPT", f"Sending cold email via Resend HTTPS API to {to_email}...", recipient=to_email)
+                    resend_resp = send_via_resend(
+                        api_key=resend_key,
+                        sender=sender or "onboarding@resend.dev",
+                        sender_name=profile.get("name") or "Applicant",
+                        to_email=to_email,
+                        subject=subject,
+                        body=body,
+                        attachment_path=resume_path_to_send,
+                        attachment_name=resume_name_to_send,
+                        from_email=resend_from
+                    )
+                    resend_quota = parse_resend_quota(resend_resp)
+                    daily_rem = resend_quota.get("daily_remaining")
+                    monthly_rem = resend_quota.get("monthly_remaining")
+                    axiom_logger.info(
+                        "RESEND_SUCCESS",
+                        f"Email delivered via Resend API to {to_email}. Quota remaining: {daily_rem}/100 today, {monthly_rem}/3000 month",
+                        recipient=to_email,
+                        resend_quota=resend_quota
+                    )
+                    sent_via_resend_ok = True
+                    try:
+                        save_user_profile({"resend_quota": resend_quota}, username=u)
+                    except Exception as save_q_err:
+                        logging.warning(f"Could not persist resend quota for {u}: {save_q_err}")
+                except Exception as resend_err:
+                    if sender and password:
+                        axiom_logger.warning(
+                            "RESEND_FALLBACK",
+                            f"Resend delivery failed ({resend_err}). Falling back to direct Gmail SMTP (IPv4)...",
+                            recipient=to_email,
+                            error=str(resend_err)
+                        )
+                        send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
+                    else:
+                        raise resend_err
+
+            if not resend_key and not sent_via_resend_ok:
                 send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
 
             step_meta["attached_resume"] = attached_resume

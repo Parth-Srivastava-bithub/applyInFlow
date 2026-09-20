@@ -210,6 +210,9 @@ class AxiomLogger:
     def warn(self, step_id: str, message: str, **context: Any):
         self.log("warn", step_id, message, status="warning", **context)
 
+    def warning(self, step_id: str, message: str, **context: Any):
+        self.log("warn", step_id, message, status="warning", **context)
+
     def error(self, step_id: str, message: str, error: Any = None, stack_trace: str | None = None, **context: Any):
         err_msg = str(error) if error else message
         st = stack_trace or (traceback.format_exc() if sys.exc_info()[0] else None)
