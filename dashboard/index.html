@@ -2136,8 +2136,8 @@
           <div class="status-badge-pill" id="user-quota-badge" style="background:#eff6ff; color:#2563eb; border-color:#bfdbfe; font-size:11px;" title="User Storage Quota (Max 100 Pending, 200 Sent)">
             <span id="quota-text">🔒 Sign In Required</span>
           </div>
-          <div class="status-badge-pill" id="resend-quota-badge" style="display:none; background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; font-size:11px; cursor:pointer;" onclick="openSettings()" title="Resend Free Tier Quota">
-            <span id="resend-quota-badge-text">⚡ Resend: 100/100</span>
+          <div class="status-badge-pill" id="resend-quota-badge" style="display:none; background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; font-size:11px; cursor:pointer;" onclick="openSettings()" title="Daily Email Quota">
+            <span id="resend-quota-badge-text">⚡ Daily Quota: 97/100</span>
           </div>
           <button class="header-icon-btn" onclick="openSettings()" title="Settings">⚙</button>
           <button class="header-icon-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode">🌙</button>
@@ -2546,23 +2546,23 @@
         <input id="s-resend-from" class="form-input" style="width:100%; font-size:12px;" placeholder="onboarding@resend.dev" />
       </div>
 
-      <!-- Resend Free Tier Quota Tracker Card -->
+      <!-- Daily Email Quota Tracker Card -->
       <div id="resend-quota-card" style="display:none; background:var(--bg-hover, rgba(59,130,246,0.06)); border:1px solid rgba(59,130,246,0.2); border-radius:6px; padding:10px 12px; margin-bottom:12px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span style="font-weight:600; font-size:11.5px; color:var(--text-main); display:flex; align-items:center; gap:5px;">
-            <span style="color:#3b82f6;">⚡</span> Resend Free Quota
+            <span style="color:#3b82f6;">⚡</span> Daily Email Quota
           </span>
           <span id="resend-quota-updated" style="font-size:10px; color:var(--text-muted);">Updated on send</span>
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
           <div style="background:var(--card-bg, #fff); padding:6px 8px; border-radius:4px; border:1px solid var(--card-border, #e2e8f0);">
             <div style="color:var(--text-muted); font-size:10px; font-weight:500;">Today's Remaining</div>
-            <div id="resend-quota-daily" style="font-weight:700; font-size:13px; color:var(--text-main); margin-top:2px;">100 / 100</div>
+            <div id="resend-quota-daily" style="font-weight:700; font-size:13px; color:var(--text-main); margin-top:2px;">97 / 100</div>
             <div style="font-size:9.5px; color:var(--text-muted);">Limit: 100 emails/day</div>
           </div>
           <div style="background:var(--card-bg, #fff); padding:6px 8px; border-radius:4px; border:1px solid var(--card-border, #e2e8f0);">
             <div style="color:var(--text-muted); font-size:10px; font-weight:500;">Monthly Remaining</div>
-            <div id="resend-quota-monthly" style="font-weight:700; font-size:13px; color:var(--text-main); margin-top:2px;">3,000 / 3,000</div>
+            <div id="resend-quota-monthly" style="font-weight:700; font-size:13px; color:var(--text-main); margin-top:2px;">2,997 / 3,000</div>
             <div style="font-size:9.5px; color:var(--text-muted);">Limit: 3,000/month</div>
           </div>
         </div>
@@ -4090,7 +4090,7 @@
           const q = data.resend_quota;
           let quotaMsg = '';
           if (q.daily_remaining !== undefined && q.daily_remaining !== null) {
-            quotaMsg = ` • Resend: ${q.daily_remaining}/${q.daily_limit} left today`;
+            quotaMsg = ` • Daily Quota: ${q.daily_remaining}/${q.daily_limit} left today`;
           }
           toast(`Sent to ${d.to_email}!${quotaMsg}`, 'success');
         } else {
@@ -4285,8 +4285,8 @@
 
       if (badge && badgeText) {
         badge.style.display = 'flex';
-        badgeText.textContent = `⚡ Resend: ${dailyRem}/${dailyLimit}`;
-        badge.title = `Resend Free Quota: ${dailyRem}/${dailyLimit} remaining today • ${monthlyRem}/${monthlyLimit} remaining this month (Click for Settings)`;
+        badgeText.textContent = `⚡ Daily Quota: ${dailyRem}/${dailyLimit}`;
+        badge.title = `Daily Quota: ${dailyRem}/${dailyLimit} remaining today • ${monthlyRem}/${monthlyLimit} remaining this month (Click for Settings)`;
 
         if (dailyRem === 0) {
           badge.style.background = '#fef2f2';
