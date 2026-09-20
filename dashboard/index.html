@@ -2136,6 +2136,9 @@
           <div class="status-badge-pill" id="user-quota-badge" style="background:#eff6ff; color:#2563eb; border-color:#bfdbfe; font-size:11px;" title="User Storage Quota (Max 100 Pending, 200 Sent)">
             <span id="quota-text">🔒 Sign In Required</span>
           </div>
+          <div class="status-badge-pill" id="resend-quota-badge" style="display:none; background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; font-size:11px; cursor:pointer;" onclick="openSettings()" title="Resend Free Tier Quota">
+            <span id="resend-quota-badge-text">⚡ Resend: 100/100</span>
+          </div>
           <button class="header-icon-btn" onclick="openSettings()" title="Settings">⚙</button>
           <button class="header-icon-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode">🌙</button>
           <div id="clerk-auth-container" style="display:flex; align-items:center; gap:8px;">
@@ -2535,6 +2538,34 @@
           Resend API Key <span style="font-size:10.5px; font-weight:400; color:var(--accent-blue);">(Recommended on Railway to bypass blocked SMTP ports)</span>
         </label>
         <input id="s-resend-key" class="form-input" style="width:100%; font-family:'Fira Code', monospace; font-size:11px;" type="password" placeholder="re_7CTvAtmP_..." />
+      </div>
+      <div style="margin-bottom:10px;">
+        <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">
+          Resend From Address <span style="font-size:10.5px; font-weight:400; color:var(--text-muted);">(Optional — e.g. onboarding@resend.dev or you@yourdomain.com)</span>
+        </label>
+        <input id="s-resend-from" class="form-input" style="width:100%; font-size:12px;" placeholder="onboarding@resend.dev" />
+      </div>
+
+      <!-- Resend Free Tier Quota Tracker Card -->
+      <div id="resend-quota-card" style="display:none; background:var(--bg-hover, rgba(59,130,246,0.06)); border:1px solid rgba(59,130,246,0.2); border-radius:6px; padding:10px 12px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-weight:600; font-size:11.5px; color:var(--text-main); display:flex; align-items:center; gap:5px;">
+            <span style="color:#3b82f6;">⚡</span> Resend Free Quota
+          </span>
+          <span id="resend-quota-updated" style="font-size:10px; color:var(--text-muted);">Updated on send</span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div style="background:var(--card-bg, #fff); padding:6px 8px; border-radius:4px; border:1px solid var(--card-border, #e2e8f0);">
+            <div style="color:var(--text-muted); font-size:10px; font-weight:500;">Today's Remaining</div>
+            <div id="resend-quota-daily" style="font-weight:700; font-size:13px; color:var(--text-main); margin-top:2px;">100 / 100</div>
+            <div style="font-size:9.5px; color:var(--text-muted);">Limit: 100 emails/day</div>
+          </div>
+          <div style="background:var(--card-bg, #fff); padding:6px 8px; border-radius:4px; border:1px solid var(--card-border, #e2e8f0);">
+            <div style="color:var(--text-muted); font-size:10px; font-weight:500;">Monthly Remaining</div>
+            <div id="resend-quota-monthly" style="font-weight:700; font-size:13px; color:var(--text-main); margin-top:2px;">3,000 / 3,000</div>
+            <div style="font-size:9.5px; color:var(--text-muted);">Limit: 3,000/month</div>
+          </div>
+        </div>
       </div>
 
       <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin:16px 0 8px; border-bottom:1px solid var(--card-border); padding-bottom:4px;">
@@ -3343,6 +3374,11 @@
         if (profile.gmail_sender) {
           document.getElementById('sidebar-user-email').textContent = profile.gmail_sender;
         }
+        if (profile.resend_quota || profile.resend_api_key) {
+          updateResendQuotaUI(profile.resend_quota, !!profile.resend_api_key);
+        } else {
+          loadResendQuota();
+        }
       } catch (e) {}
     }
 
@@ -4047,7 +4083,19 @@
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
-        toast(`Sent to ${d.to_email}!`, 'success');
+        if (data.resend_quota) {
+          if (!profile) profile = {};
+          profile.resend_quota = data.resend_quota;
+          updateResendQuotaUI(data.resend_quota, true);
+          const q = data.resend_quota;
+          let quotaMsg = '';
+          if (q.daily_remaining !== undefined && q.daily_remaining !== null) {
+            quotaMsg = ` • Resend: ${q.daily_remaining}/${q.daily_limit} left today`;
+          }
+          toast(`Sent to ${d.to_email}!${quotaMsg}`, 'success');
+        } else {
+          toast(`Sent to ${d.to_email}!`, 'success');
+        }
         d.status = 'sent';
         await loadDrafts();
         await loadContacts();
@@ -4207,7 +4255,79 @@
       document.getElementById('s-groq-key').value = profile.groq_api_key || '';
       document.getElementById('s-openai-key').value = profile.openai_api_key || '';
       document.getElementById('s-resend-key').value = profile.resend_api_key || '';
+      document.getElementById('s-resend-from').value = profile.resend_from_email || '';
+      updateResendQuotaUI(profile.resend_quota, !!profile.resend_api_key);
       document.getElementById('settings-modal').classList.add('open');
+    }
+
+    function updateResendQuotaUI(quota, hasResend) {
+      const badge = document.getElementById('resend-quota-badge');
+      const badgeText = document.getElementById('resend-quota-badge-text');
+      const card = document.getElementById('resend-quota-card');
+      const dailyEl = document.getElementById('resend-quota-daily');
+      const monthlyEl = document.getElementById('resend-quota-monthly');
+      const updatedEl = document.getElementById('resend-quota-updated');
+
+      const isResendConfigured = hasResend || (profile && profile.resend_api_key) || (quota && Object.keys(quota).length > 0);
+      if (!isResendConfigured) {
+        if (badge) badge.style.display = 'none';
+        if (card) card.style.display = 'none';
+        return;
+      }
+
+      if (card) card.style.display = 'block';
+
+      const q = quota || (profile && profile.resend_quota) || {};
+      const dailyRem = q.daily_remaining !== undefined && q.daily_remaining !== null ? q.daily_remaining : 100;
+      const dailyLimit = q.daily_limit || 100;
+      const monthlyRem = q.monthly_remaining !== undefined && q.monthly_remaining !== null ? q.monthly_remaining : 3000;
+      const monthlyLimit = q.monthly_limit || 3000;
+
+      if (badge && badgeText) {
+        badge.style.display = 'flex';
+        badgeText.textContent = `⚡ Resend: ${dailyRem}/${dailyLimit}`;
+        badge.title = `Resend Free Quota: ${dailyRem}/${dailyLimit} remaining today • ${monthlyRem}/${monthlyLimit} remaining this month (Click for Settings)`;
+
+        if (dailyRem === 0) {
+          badge.style.background = '#fef2f2';
+          badge.style.color = '#dc2626';
+          badge.style.borderColor = '#fecaca';
+        } else if (dailyRem <= 10) {
+          badge.style.background = '#fffbeb';
+          badge.style.color = '#d97706';
+          badge.style.borderColor = '#fde68a';
+        } else {
+          badge.style.background = '#f0fdf4';
+          badge.style.color = '#16a34a';
+          badge.style.borderColor = '#bbf7d0';
+        }
+      }
+
+      if (dailyEl) dailyEl.textContent = `${dailyRem} / ${dailyLimit}`;
+      if (monthlyEl) monthlyEl.textContent = `${monthlyRem} / ${monthlyLimit}`;
+      if (updatedEl) {
+        if (q.last_checked) {
+          try {
+            const dt = new Date(q.last_checked);
+            updatedEl.textContent = `Updated ${dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+          } catch (_) {
+            updatedEl.textContent = 'Updated recently';
+          }
+        } else {
+          updatedEl.textContent = 'Updates on next send';
+        }
+      }
+    }
+
+    async function loadResendQuota() {
+      if (!currentUsername) return;
+      try {
+        const res = await apiFetch('/api/resend/quota');
+        const data = await res.json();
+        updateResendQuotaUI(data.quota, data.has_resend);
+      } catch (e) {
+        console.warn('Failed to load resend quota:', e);
+      }
     }
 
     function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
@@ -4223,6 +4343,7 @@
         groq_api_key: document.getElementById('s-groq-key').value.trim(),
         openai_api_key: document.getElementById('s-openai-key').value.trim(),
         resend_api_key: document.getElementById('s-resend-key').value.trim(),
+        resend_from_email: document.getElementById('s-resend-from').value.trim(),
       };
       await apiFetch('/api/profile', {
         method: 'POST',

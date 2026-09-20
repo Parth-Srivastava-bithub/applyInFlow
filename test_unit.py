@@ -363,6 +363,7 @@ class TestZeroDataLeakage(unittest.TestCase):
             "gmail_sender": "jane@example.com",
             "gmail_app_password": "abcd efgh ijkl mnop",
             "resend_api_key": "re_test1234567890",
+            "resend_from_email": "onboarding@resend.dev",
         }
         saved = save_user_profile(profile_data, username=test_user)
         self.assertEqual(saved["groq_api_key"], "gsk_test1234567890")
@@ -376,6 +377,7 @@ class TestZeroDataLeakage(unittest.TestCase):
         self.assertEqual(loaded["gmail_sender"], "jane@example.com")
         self.assertEqual(loaded["gmail_app_password"], "abcd efgh ijkl mnop")
         self.assertEqual(loaded["resend_api_key"], "re_test1234567890")
+        self.assertEqual(loaded["resend_from_email"], "onboarding@resend.dev")
         db.clear_user_data(test_user)
 
     def test_smtp_timeout_fallback(self):
@@ -406,6 +408,46 @@ class TestZeroDataLeakage(unittest.TestCase):
                 subject="Test Subject",
                 body="Test Body"
             )
+
+    def test_parse_resend_quota(self):
+        """parse_resend_quota correctly extracts daily and monthly usage from HTTP response headers."""
+        from server import parse_resend_quota
+
+        # 1. Normal Free Tier response with quota headers
+        mock_resp = {
+            "id": "resend_msg_123",
+            "http_headers": {
+                "x-resend-daily-quota": "14",
+                "x-resend-monthly-quota": "120",
+                "ratelimit-remaining": "8"
+            }
+        }
+        quota = parse_resend_quota(mock_resp)
+        self.assertEqual(quota["daily_used"], 14)
+        self.assertEqual(quota["daily_limit"], 100)
+        self.assertEqual(quota["daily_remaining"], 86)
+        self.assertEqual(quota["monthly_used"], 120)
+        self.assertEqual(quota["monthly_limit"], 3000)
+        self.assertEqual(quota["monthly_remaining"], 2880)
+        self.assertEqual(quota["rate_remaining"], "8")
+        self.assertIn("last_checked", quota)
+
+        # 2. Exceeded quota boundary condition (never negative)
+        mock_exceeded = {
+            "id": "resend_msg_456",
+            "http_headers": {
+                "x-resend-daily-quota": "105",
+                "x-resend-monthly-quota": "3050"
+            }
+        }
+        quota_exceeded = parse_resend_quota(mock_exceeded)
+        self.assertEqual(quota_exceeded["daily_remaining"], 0)
+        self.assertEqual(quota_exceeded["monthly_remaining"], 0)
+
+        # 3. Empty headers fallback
+        quota_empty = parse_resend_quota({})
+        self.assertIsNone(quota_empty["daily_used"])
+        self.assertEqual(quota_empty["daily_remaining"], "Unlimited")
 
 
 if __name__ == "__main__":
