@@ -363,7 +363,6 @@ class TestZeroDataLeakage(unittest.TestCase):
             "gmail_sender": "jane@example.com",
             "gmail_app_password": "abcd efgh ijkl mnop",
             "resend_api_key": "re_test1234567890",
-            "resend_from_email": "onboarding@resend.dev",
         }
         saved = save_user_profile(profile_data, username=test_user)
         self.assertEqual(saved["groq_api_key"], "gsk_test1234567890")
@@ -377,7 +376,6 @@ class TestZeroDataLeakage(unittest.TestCase):
         self.assertEqual(loaded["gmail_sender"], "jane@example.com")
         self.assertEqual(loaded["gmail_app_password"], "abcd efgh ijkl mnop")
         self.assertEqual(loaded["resend_api_key"], "re_test1234567890")
-        self.assertEqual(loaded["resend_from_email"], "onboarding@resend.dev")
         db.clear_user_data(test_user)
 
     def test_smtp_timeout_fallback(self):

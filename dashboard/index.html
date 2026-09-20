@@ -2536,12 +2536,6 @@
         </label>
         <input id="s-resend-key" class="form-input" style="width:100%; font-family:'Fira Code', monospace; font-size:11px;" type="password" placeholder="re_7CTvAtmP_..." />
       </div>
-      <div style="margin-bottom:10px;">
-        <label style="display:block; font-size:11.5px; font-weight:600; color:var(--text-main); margin-bottom:4px;">
-          Resend From Address <span style="font-size:10.5px; font-weight:400; color:var(--text-muted);">(Optional — e.g. onboarding@resend.dev or you@yourdomain.com)</span>
-        </label>
-        <input id="s-resend-from" class="form-input" style="width:100%; font-size:12px;" placeholder="onboarding@resend.dev" />
-      </div>
 
       <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin:16px 0 8px; border-bottom:1px solid var(--card-border); padding-bottom:4px;">
         AI API Keys
@@ -4213,7 +4207,6 @@
       document.getElementById('s-groq-key').value = profile.groq_api_key || '';
       document.getElementById('s-openai-key').value = profile.openai_api_key || '';
       document.getElementById('s-resend-key').value = profile.resend_api_key || '';
-      document.getElementById('s-resend-from').value = profile.resend_from_email || '';
       document.getElementById('settings-modal').classList.add('open');
     }
 
@@ -4230,7 +4223,6 @@
         groq_api_key: document.getElementById('s-groq-key').value.trim(),
         openai_api_key: document.getElementById('s-openai-key').value.trim(),
         resend_api_key: document.getElementById('s-resend-key').value.trim(),
-        resend_from_email: document.getElementById('s-resend-from').value.trim(),
       };
       await apiFetch('/api/profile', {
         method: 'POST',
