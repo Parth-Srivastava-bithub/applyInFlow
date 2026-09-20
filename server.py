@@ -1910,11 +1910,16 @@ def send_email():
                             attached_resume = True
                             break
 
-            # Delivery Priority:
-            # 1. Official Gmail REST API over HTTPS (Port 443 — 1-Click OAuth, zero domain setup, 500 emails/day)
-            # 2. Resend HTTPS API (Port 443)
-            # 3. Direct Gmail IPv4 SMTP (fallback for local development)
+            # Delivery Strategy:
+            # 1. Official Gmail REST API over HTTPS (Port 443 — if Google OAuth is connected)
+            # 2. Direct Gmail IPv4 SMTP (if running locally or SMTP credentials provided, sends directly from candidate's Gmail)
+            # 3. Resend HTTPS API (Port 443 fallback for cloud deployments where raw SMTP ports are blocked)
+            is_cloud = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_STATIC_URL") or os.getenv("PORT") == "8080")
             sent_via_gmail_api_ok = False
+            sent_via_smtp_ok = False
+            resend_quota = None
+            sent_via_resend_ok = False
+
             if has_oauth:
                 try:
                     token = get_valid_google_access_token(profile, username=u)
@@ -1953,9 +1958,19 @@ def send_email():
                     if not resend_key and (not sender or not password):
                         raise RuntimeError(f"Gmail API delivery failed: {g_err}") from g_err
 
-            resend_quota = None
-            sent_via_resend_ok = False
-            if not sent_via_gmail_api_ok and resend_key:
+            # If not sent via OAuth and we are running locally (or not on Railway cloud) with valid SMTP credentials:
+            if not sent_via_gmail_api_ok and sender and password and not is_cloud:
+                try:
+                    axiom_logger.info("LOCAL_SMTP_ATTEMPT", f"Sending cold email via direct Gmail SMTP to {to_email}...", recipient=to_email)
+                    send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
+                    sent_via_smtp_ok = True
+                except Exception as local_smtp_err:
+                    axiom_logger.warning("LOCAL_SMTP_FAILED", f"Direct SMTP failed: {local_smtp_err}", error=str(local_smtp_err))
+                    if not resend_key:
+                        raise local_smtp_err
+
+            # If not sent yet, try Resend HTTPS API (Port 443)
+            if not sent_via_gmail_api_ok and not sent_via_smtp_ok and resend_key:
                 try:
                     axiom_logger.info("RESEND_ATTEMPT", f"Sending cold email via Resend HTTPS API to {to_email}...", recipient=to_email)
                     resend_resp = send_via_resend(
@@ -1993,13 +2008,14 @@ def send_email():
                         )
                         try:
                             send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
+                            sent_via_smtp_ok = True
                         except Exception as smtp_err:
                             err_msg = f"{resend_err} (SMTP fallback on ports 465 & 587 also failed: {smtp_err})"
                             raise RuntimeError(err_msg) from smtp_err
                     else:
                         raise resend_err
 
-            if not sent_via_gmail_api_ok and not resend_key and not sent_via_resend_ok:
+            if not sent_via_gmail_api_ok and not sent_via_smtp_ok and not sent_via_resend_ok:
                 send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
 
             step_meta["attached_resume"] = attached_resume
