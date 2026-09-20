@@ -362,10 +362,13 @@ class TestZeroDataLeakage(unittest.TestCase):
             "openai_api_key": "sk-test1234567890",
             "gmail_sender": "jane@example.com",
             "gmail_app_password": "abcd efgh ijkl mnop",
+            "resend_api_key": "re_test1234567890",
+            "resend_from_email": "onboarding@resend.dev",
         }
         saved = save_user_profile(profile_data, username=test_user)
         self.assertEqual(saved["groq_api_key"], "gsk_test1234567890")
         self.assertEqual(saved["gmail_sender"], "jane@example.com")
+        self.assertEqual(saved["resend_api_key"], "re_test1234567890")
 
         # Reload profile and verify keys are preserved
         loaded = load_profile(username=test_user)
@@ -373,6 +376,8 @@ class TestZeroDataLeakage(unittest.TestCase):
         self.assertEqual(loaded["openai_api_key"], "sk-test1234567890")
         self.assertEqual(loaded["gmail_sender"], "jane@example.com")
         self.assertEqual(loaded["gmail_app_password"], "abcd efgh ijkl mnop")
+        self.assertEqual(loaded["resend_api_key"], "re_test1234567890")
+        self.assertEqual(loaded["resend_from_email"], "onboarding@resend.dev")
         db.clear_user_data(test_user)
 
     def test_smtp_timeout_fallback(self):
@@ -386,6 +391,22 @@ class TestZeroDataLeakage(unittest.TestCase):
                 to_email="test@example.com",
                 msg_str="Subject: Test\n\nBody",
                 timeout=1
+            )
+
+    def test_resend_sdk_import_and_signature(self):
+        """Resend SDK is correctly installed and send_via_resend is callable."""
+        import resend
+        from server import send_via_resend
+        self.assertTrue(hasattr(resend.Emails, "send"))
+        # Calling with a dummy key should raise RuntimeError with clean failure message
+        with self.assertRaises(RuntimeError):
+            send_via_resend(
+                api_key="re_invalid_test_key",
+                sender="jane@example.com",
+                sender_name="Jane",
+                to_email="test@example.com",
+                subject="Test Subject",
+                body="Test Body"
             )
 
 

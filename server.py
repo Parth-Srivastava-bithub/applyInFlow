@@ -262,6 +262,7 @@ def load_profile(username: Optional[str] = None) -> dict:
         "groq_api_key": "",
         "openai_api_key": "",
         "resend_api_key": "",
+        "resend_from_email": "",
     }
     if not username:
         return default
@@ -294,6 +295,8 @@ def load_profile(username: Optional[str] = None) -> dict:
             res["openai_api_key"] = os.getenv("OPENAI_API_KEY", "")
         if not res.get("resend_api_key"):
             res["resend_api_key"] = os.getenv("RESEND_API_KEY", "")
+        if not res.get("resend_from_email"):
+            res["resend_from_email"] = os.getenv("RESEND_FROM_EMAIL", "")
     return res
 
 
@@ -610,6 +613,10 @@ def save_profile_route():
         resend_val = (data["resend_api_key"] or "").strip()
         os.environ["RESEND_API_KEY"] = resend_val
         env_updates["RESEND_API_KEY"] = resend_val
+    if "resend_from_email" in data and u in OWNER_ALIASES:
+        from_val = (data["resend_from_email"] or "").strip()
+        os.environ["RESEND_FROM_EMAIL"] = from_val
+        env_updates["RESEND_FROM_EMAIL"] = from_val
 
     if env_updates:
         try:
@@ -1348,46 +1355,52 @@ def send_smtp_email(sender: str, password: str, to_email: str, msg_str: str, tim
         raise RuntimeError(f"Failed to send email via SMTP (tried ports 465 & 587): {last_err}") from last_err
 
 
-def send_via_resend(api_key: str, sender: str, sender_name: str, to_email: str, subject: str, body: str, attachment_path: Optional[Path] = None, attachment_name: str = "Resume.pdf") -> dict:
+def send_via_resend(api_key: str, sender: str, sender_name: str, to_email: str, subject: str, body: str, attachment_path: Optional[Path] = None, attachment_name: str = "Resume.pdf", from_email: Optional[str] = None) -> dict:
     """
-    Sends email via Resend HTTPS REST API (Port 443 — 100% allowed on all cloud platforms including Railway).
+    Sends email via official Resend Python SDK (Port 443 — 100% allowed on all cloud platforms including Railway).
     Sets reply_to to candidate's Gmail so all recruiter responses arrive in the candidate's personal inbox.
     """
-    import base64
-    from_header = f"{sender_name} <onboarding@resend.dev>" if "@gmail.com" in (sender or "").lower() else f"{sender_name} <{sender}>"
-    payload = {
+    import resend
+
+    resend.api_key = api_key.strip()
+
+    # Determine 'from' address: if user specified a custom verified domain, use it; otherwise use onboarding@resend.dev
+    if from_email and "@" in from_email:
+        from_header = f"{sender_name} <{from_email}>" if sender_name else from_email
+    elif sender and "@" in sender and not sender.lower().endswith("@gmail.com"):
+        from_header = f"{sender_name} <{sender}>" if sender_name else sender
+    else:
+        from_header = f"{sender_name} <onboarding@resend.dev>" if sender_name else "onboarding@resend.dev"
+
+    body_html = body.replace("\n", "<br>")
+    params: dict = {
         "from": from_header,
-        "to": [to_email],
-        "reply_to": sender or None,
+        "to": [to_email] if isinstance(to_email, str) else to_email,
         "subject": subject,
+        "html": f"<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; font-size:14px; line-height:1.6; color:#1a1a1a;'>{body_html}</div>",
         "text": body,
     }
+    if sender and "@" in sender:
+        params["reply_to"] = sender
+
     if attachment_path and attachment_path.exists():
         with open(attachment_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-        payload["attachments"] = [{
-            "filename": attachment_name,
-            "content": b64
-        }]
+            params["attachments"] = [{
+                "filename": attachment_name,
+                "content": list(f.read())
+            }]
 
-    resp = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        },
-        json=payload,
-        timeout=15
-    )
-    if resp.status_code >= 400:
-        err_msg = resp.text
-        try:
-            err_json = resp.json()
-            err_msg = err_json.get("message") or str(err_json)
-        except Exception:
-            pass
-        raise RuntimeError(f"Resend API error ({resp.status_code}): {err_msg}")
-    return resp.json()
+    try:
+        resp = resend.Emails.send(params)
+        return resp
+    except Exception as e:
+        err_msg = str(e)
+        if "resend.com/domains" in err_msg or "testing emails" in err_msg:
+            err_msg = (
+                "Resend Free Tier Notice: 'onboarding@resend.dev' can only send test emails to your registered email address. "
+                "To send to recruiter emails, please add and verify a domain at resend.com/domains and set it in 'Resend From Address' in Settings."
+            )
+        raise RuntimeError(f"Resend send failed: {err_msg}") from e
 
 
 
@@ -1406,6 +1419,7 @@ def send_email():
     password = (profile.get("gmail_app_password") or "").strip().replace(" ", "")
     resume_fn = profile.get("resume_filename", "")
     resend_key = (profile.get("resend_api_key") or os.getenv("RESEND_API_KEY") or "").strip()
+    resend_from = (profile.get("resend_from_email") or os.getenv("RESEND_FROM_EMAIL") or "").strip()
 
     if not resend_key and (not sender or not password):
         return jsonify({"error": "Gmail credentials or Resend API key not set in Settings"}), 400
@@ -1467,7 +1481,8 @@ def send_email():
                     subject=subject,
                     body=body,
                     attachment_path=resume_path_to_send,
-                    attachment_name=resume_name_to_send
+                    attachment_name=resume_name_to_send,
+                    from_email=resend_from
                 )
                 axiom_logger.info("RESEND_SUCCESS", f"Email delivered via Resend API to {to_email}", recipient=to_email)
             else:
