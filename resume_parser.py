@@ -318,20 +318,21 @@ def format_candidate_context_for_prompt(profile: StructuredResumeProfile) -> str
     skills_str = ", ".join(profile.key_skills) if profile.key_skills else "AI, Machine Learning, Python"
     projects_str = "\n".join([f"- {p}" for p in profile.key_projects_or_achievements]) if profile.key_projects_or_achievements else "N/A"
 
-    portfolio = "https://parthml.in"
+    portfolio = ""
     for lk in (profile.links or []):
-        if "parthml" in lk:
-            portfolio = "https://parthml.in"
+        lk_str = str(lk).strip()
+        if "linkedin.com" not in lk_str.lower():
+            portfolio = lk_str if lk_str.startswith("http") else f"https://{lk_str}"
             break
-        elif "portfolio" in lk or "github" in lk:
-            portfolio = lk if lk.startswith("http") else f"https://{lk}"
+
+    portfolio_line = f"- Portfolio / Website: {portfolio}" if portfolio else "- Portfolio / Website: Not provided"
 
     ctx = f"""Candidate Profile (Extracted from Resume):
 - Name: {profile.name}
 - Target Role / Headline: {profile.headline_or_role}
 - Experience: {profile.years_of_experience or '2+ years'}
 - Location: {profile.location or 'India (Open to Remote / Hybrid)'}
-- Portfolio / Website: {portfolio}
+{portfolio_line}
 - Key Skills: {skills_str}
 - Professional Summary: {profile.professional_summary}
 - Notable Projects / Accomplishments:

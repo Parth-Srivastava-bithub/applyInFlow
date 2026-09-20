@@ -382,16 +382,24 @@ class TestZeroDataLeakage(unittest.TestCase):
 
     def test_smtp_timeout_fallback(self):
         """send_smtp_email raises RuntimeError after timeout without blocking indefinitely."""
+        from unittest.mock import patch
         from server import send_smtp_email
-        with self.assertRaises((RuntimeError, Exception)):
-            # Invalid credentials and nonexistent socket should fail fast within 1s timeout
-            send_smtp_email(
-                sender="invalid@example.com",
-                password="invalidpassword",
-                to_email="test@example.com",
-                msg_str="Subject: Test\n\nBody",
-                timeout=1
-            )
+        with patch("axiom_logger._global_queue.enqueue"):
+            with self.assertRaises((RuntimeError, Exception)):
+                # Invalid credentials and nonexistent socket should fail fast within 1s timeout
+                send_smtp_email(
+                    sender="invalid@example.com",
+                    password="invalidpassword",
+                    to_email="test@example.com",
+                    msg_str="Subject: Test\n\nBody",
+                    timeout=1
+                )
+
+    def test_portfolio_url_not_hardcoded_for_other_users(self):
+        """Non-owner users must not have parthml.in hardcoded in their profile or drafts."""
+        from server import load_profile
+        non_owner = load_profile("recruiter_guest_user_123")
+        self.assertEqual(non_owner.get("portfolio_url", ""), "")
 
     def test_resend_sdk_import_and_signature(self):
         """Resend SDK is correctly installed and send_via_resend is callable."""

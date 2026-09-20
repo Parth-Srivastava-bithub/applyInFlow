@@ -258,6 +258,7 @@ def load_profile(username: Optional[str] = None) -> dict:
         "location": "India (open to remote / hybrid)",
         "linkedin": "",
         "phone": "",
+        "portfolio_url": "",
         "gmail_sender": "",
         "gmail_app_password": "",
         "resume_filename": "",
@@ -299,6 +300,8 @@ def load_profile(username: Optional[str] = None) -> dict:
             res["resend_api_key"] = os.getenv("RESEND_API_KEY", "")
         if not res.get("resend_from_email"):
             res["resend_from_email"] = os.getenv("RESEND_FROM_EMAIL", "")
+        if not res.get("portfolio_url"):
+            res["portfolio_url"] = os.getenv("PORTFOLIO_URL", "https://parthml.in")
     return res
 
 
@@ -619,6 +622,10 @@ def save_profile_route():
         from_val = (data["resend_from_email"] or "").strip()
         os.environ["RESEND_FROM_EMAIL"] = from_val
         env_updates["RESEND_FROM_EMAIL"] = from_val
+    if "portfolio_url" in data and u in OWNER_ALIASES:
+        port_val = (data["portfolio_url"] or "").strip()
+        os.environ["PORTFOLIO_URL"] = port_val
+        env_updates["PORTFOLIO_URL"] = port_val
 
     if env_updates:
         try:
@@ -805,8 +812,6 @@ def get_emails():
                 has_changes = True
             continue
         d["to_name"] = resolve_contact_name(d.get("to_name"), em)
-        if d.get("body"):
-            d["body"] = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", d["body"])
         pending_drafts.append(d)
 
     # Dynamically verify missing_tags against current resume skills so false-missing tags turn green
@@ -1256,7 +1261,9 @@ def generate_email():
             from pipeline.email_drafter import draft_email as _draft_email
             is_openai = any(req_model.startswith(p) for p in ("gpt-", "o1", "o3", "chatgpt"))
             user_api_key = (profile.get("openai_api_key") if is_openai else profile.get("groq_api_key")) or ""
-            portfolio_url = profile.get("portfolio_url") or profile.get("website") or "https://parthml.in"
+            portfolio_url = (profile.get("portfolio_url") or profile.get("website") or "").strip()
+            if is_owner and not portfolio_url:
+                portfolio_url = "https://parthml.in"
             draft = _draft_email(
                 hr_name=hr_name,
                 hr_title=hr_title,
@@ -1989,8 +1996,6 @@ def save_email():
     to_email = data.get("to_email", "")
     clean_email = to_email.lower().strip()
     data["to_name"] = resolve_contact_name(data.get("to_name"), clean_email)
-    if data.get("body"):
-        data["body"] = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", data["body"])
 
     idx = next((i for i, e in enumerate(emails) if (e.get("to_email") or "").lower().strip() == clean_email), None)
     if idx is not None:

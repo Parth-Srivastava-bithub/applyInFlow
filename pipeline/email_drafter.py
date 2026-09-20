@@ -163,7 +163,7 @@ def draft_email(
     cand_name: str,
     model: str | None = None,
     api_key: str | None = None,
-    portfolio_url: str = "https://parthml.in",
+    portfolio_url: str = "",
 ) -> Dict[str, str]:
     """
     Draft a cold email from the candidate to a specific HR contact.
@@ -177,7 +177,7 @@ def draft_email(
         cand_name:          Candidate's display name (e.g. "Parth Srivastava").
         model:              LLM model identifier. Defaults to GROQ_MODEL env var.
         api_key:            Optional API key (Groq or OpenAI) for the user.
-        portfolio_url:      Candidate's portfolio link (e.g. "https://parthml.in").
+        portfolio_url:      Candidate's optional portfolio link.
 
     Returns:
         dict with keys: "subject" (str), "body" (str), "raw" (str)
@@ -204,11 +204,14 @@ def draft_email(
         greeting_line = "Hi,"
 
     # Clean portfolio URL display: ensure full https:// so email clients make it clickable
-    raw_portfolio = (portfolio_url or "https://parthml.in").strip()
-    if not raw_portfolio.startswith("http://") and not raw_portfolio.startswith("https://"):
-        clean_portfolio_display = f"https://{raw_portfolio}".rstrip("/")
+    raw_portfolio = (portfolio_url or "").strip()
+    if raw_portfolio:
+        if not raw_portfolio.startswith("http://") and not raw_portfolio.startswith("https://"):
+            clean_portfolio_display = f"https://{raw_portfolio}".rstrip("/")
+        else:
+            clean_portfolio_display = raw_portfolio.rstrip("/")
     else:
-        clean_portfolio_display = raw_portfolio.rstrip("/")
+        clean_portfolio_display = ""
 
     # Load and render system prompt from prompts/email_draft.txt
     template_src = _load_prompt()
@@ -256,15 +259,17 @@ def draft_email(
         else:
             body = f"{greeting_line}\n\n{body}"
 
-    # Upgrade any naked domain like 'parthml.in' into clickable 'https://parthml.in'
-    body = re.sub(r"(?<!https://)(?<!http://)\bparthml\.in\b", "https://parthml.in", body)
+    # Upgrade any naked domain into clickable link and append to sign-off only if portfolio provided
+    if clean_portfolio_display:
+        naked_domain = re.sub(r"^https?://", "", clean_portfolio_display).rstrip("/")
+        if naked_domain and naked_domain in body:
+            body = re.sub(rf"(?<!https://)(?<!http://)\b{re.escape(naked_domain)}\b", clean_portfolio_display, body)
 
-    # Guarantee portfolio link appears in sign-off if omitted by model
-    if clean_portfolio_display and clean_portfolio_display.lower() not in body.lower():
-        if cand_name in body:
-            body = re.sub(re.escape(cand_name), f"{cand_name}\n{clean_portfolio_display}", body, count=1)
-        else:
-            body = body.rstrip() + f"\n\nBest,\n{cand_name}\n{clean_portfolio_display}"
+        if clean_portfolio_display.lower() not in body.lower():
+            if cand_name in body:
+                body = re.sub(re.escape(cand_name), f"{cand_name}\n{clean_portfolio_display}", body, count=1)
+            else:
+                body = body.rstrip() + f"\n\nBest,\n{cand_name}\n{clean_portfolio_display}"
 
     logger.debug(f"Drafted email for {hr_email}: subject='{subject[:60]}...'")
 
