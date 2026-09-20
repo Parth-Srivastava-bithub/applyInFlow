@@ -8,6 +8,7 @@ Handles:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ import re
 import smtplib
 import socket
 import ssl
+import time
 from collections import deque
 from datetime import datetime, timezone
 from email.mime.application import MIMEApplication
@@ -26,7 +28,7 @@ from typing import Optional, List, Dict, Any, Set
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory, Response
+from flask import Flask, jsonify, request, send_from_directory, Response, redirect
 from playwright.async_api import async_playwright
 from werkzeug.utils import secure_filename
 
@@ -90,6 +92,13 @@ GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
 OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
 OPENAI_URL      = "https://api.openai.com/v1/chat/completions"
 MODEL           = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+
+GOOGLE_CLIENT_ID     = (os.getenv("GOOGLE_CLIENT_ID") or os.getenv("CLIENT_ID") or "").strip()
+GOOGLE_CLIENT_SECRET = (os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("CLIENT_SECRET") or "").strip()
+GOOGLE_AUTH_URL      = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL  = "https://www.googleapis.com/oauth2/v2/userinfo"
+GOOGLE_SCOPES        = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email openid"
 
 OUTPUT_DIR             = Path("output")
 CONTACTS_FILE          = OUTPUT_DIR / "hr_gmail_posts.json"
@@ -700,6 +709,167 @@ def get_resend_quota_route():
         "has_resend": bool(resend_key),
         "quota": quota
     })
+
+
+@app.route("/api/auth/google/login", methods=["GET"])
+def google_auth_login():
+    """
+    Initiates Google OAuth 2.0 flow for 1-click Gmail outreach authorization.
+    Redirects candidate to Google's consent screen requesting offline access to gmail.send & email info.
+    """
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return jsonify({
+            "error": "Google OAuth is not configured on server. Please set CLIENT_ID and CLIENT_SECRET in .env or environment variables."
+        }), 400
+
+    u = get_current_username() or request.args.get("username") or "legacy"
+    redirect_uri = get_google_redirect_uri()
+
+    import urllib.parse
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": GOOGLE_SCOPES,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": u,
+        "include_granted_scopes": "true",
+    }
+    auth_url = f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
+    return redirect(auth_url)
+
+
+@app.route("/api/auth/google/callback", methods=["GET"])
+def google_auth_callback():
+    """
+    Handles redirect callback from Google OAuth consent screen.
+    Exchanges code for tokens, retrieves user's email, and saves credentials in user profile.
+    """
+    code = request.args.get("code")
+    err = request.args.get("error")
+    state_u = request.args.get("state") or get_current_username() or "legacy"
+    u = db.sanitize_username(state_u)
+
+    import urllib.parse
+
+    if err:
+        axiom_logger.warning("GOOGLE_OAUTH_CALLBACK_DENIED", f"User denied Google authorization: {err}", username=u)
+        return redirect(f"/?gmail_error={urllib.parse.quote(err)}")
+
+    if not code:
+        return redirect("/?gmail_error=No+authorization+code+received")
+
+    redirect_uri = get_google_redirect_uri()
+    try:
+        # Exchange authorization code for tokens
+        token_resp = requests.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=15,
+        )
+
+        if token_resp.status_code != 200:
+            axiom_logger.error("GOOGLE_TOKEN_EXCHANGE_FAILED", f"Token exchange failed ({token_resp.status_code}): {token_resp.text}")
+            return redirect(f"/?gmail_error={urllib.parse.quote('Token exchange failed: ' + token_resp.text[:100])}")
+
+        tokens = token_resp.json()
+        access_token = tokens.get("access_token")
+        refresh_token = tokens.get("refresh_token")
+        expires_in = tokens.get("expires_in", 3600)
+        expires_at = time.time() + expires_in
+
+        # Fetch candidate's Gmail address from Google UserInfo
+        user_email = ""
+        try:
+            info_resp = requests.get(
+                GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10
+            )
+            if info_resp.status_code == 200:
+                user_email = info_resp.json().get("email", "")
+        except Exception as ie:
+            logger.warning(f"Could not fetch Google user info: {ie}")
+
+        # Update profile with google_oauth state
+        profile = load_profile(username=u)
+        existing_oauth = profile.get("google_oauth") or {}
+        if not refresh_token and existing_oauth.get("refresh_token"):
+            refresh_token = existing_oauth["refresh_token"]
+
+        profile["google_oauth"] = {
+            "connected": True,
+            "email": user_email or existing_oauth.get("email") or profile.get("gmail_sender", ""),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        if user_email:
+            profile["gmail_sender"] = user_email
+
+        save_user_profile(profile, username=u)
+
+        axiom_logger.info(
+            "GOOGLE_OAUTH_CONNECTED",
+            f"Successfully connected Gmail for user '{u}': {user_email}",
+            username=u,
+            connected_email=user_email
+        )
+
+        resp = redirect("/?gmail_connected=1")
+        if u and u not in ("null", "undefined", "anonymous", "guest", "none", "legacy"):
+            resp.set_cookie("autoapply_user", u, max_age=30*86400, samesite="Lax")
+        return resp
+
+    except Exception as e:
+        axiom_logger.error("GOOGLE_CALLBACK_EXCEPTION", f"Exception during Google OAuth callback: {e}", error=str(e), username=u)
+        return redirect(f"/?gmail_error={urllib.parse.quote(str(e))}")
+
+
+@app.route("/api/auth/google/status", methods=["GET"])
+def google_auth_status():
+    """
+    Returns current Google OAuth connection status for the logged-in user.
+    """
+    u = get_current_username()
+    if not u:
+        return jsonify({
+            "connected": False,
+            "email": "",
+            "configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+        })
+    profile = load_profile(username=u)
+    oauth = profile.get("google_oauth") or {}
+    is_connected = bool(oauth.get("connected") and (oauth.get("refresh_token") or oauth.get("access_token")))
+    return jsonify({
+        "connected": is_connected,
+        "email": oauth.get("email") or profile.get("gmail_sender") or "",
+        "configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+    })
+
+
+@app.route("/api/auth/google/disconnect", methods=["POST"])
+def google_auth_disconnect():
+    """
+    Disconnects Google OAuth from user's profile.
+    """
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
+    profile = load_profile(username=u)
+    if "google_oauth" in profile:
+        profile["google_oauth"] = {"connected": False}
+        save_user_profile(profile, username=u)
+    axiom_logger.info("GOOGLE_OAUTH_DISCONNECTED", f"Disconnected Google OAuth for user {u}", username=u)
+    return jsonify({"success": True, "connected": False})
 
 
 @app.route("/api/contacts", methods=["GET"])
@@ -1437,6 +1607,131 @@ def send_smtp_email(sender: str, password: str, to_email: str, msg_str: str, tim
         raise RuntimeError(f"Failed to send email via SMTP (tried ports 465 & 587): {last_err}") from last_err
 
 
+def get_google_redirect_uri() -> str:
+    """
+    Determines the appropriate Google OAuth redirect URI dynamically based on the request host.
+    Matches the URIs configured in Google Cloud Console:
+    - Local: http://localhost:5000/api/auth/google/callback
+    - Cloud: https://applyinflow-production.up.railway.app/api/auth/google/callback
+    """
+    configured = (os.getenv("GOOGLE_REDIRECT_URI") or "").strip()
+    if configured:
+        return configured
+    proto = request.headers.get("X-Forwarded-Proto", "http")
+    host = request.host
+    if "railway.app" in host or proto == "https":
+        return f"https://{host}/api/auth/google/callback"
+    return f"{proto}://{host}/api/auth/google/callback"
+
+
+def get_valid_google_access_token(profile: dict, username: str) -> Optional[str]:
+    """
+    Returns an active Google OAuth access token for sending via Gmail REST API.
+    If the current access token has expired (or is close to expiring in < 60s),
+    uses the refresh_token to acquire a fresh access token from Google and updates the profile.
+    """
+    oauth = profile.get("google_oauth") or {}
+    if not oauth.get("connected"):
+        return None
+
+    access_token = oauth.get("access_token")
+    expires_at = oauth.get("expires_at") or 0
+    refresh_token = oauth.get("refresh_token")
+
+    if access_token and (expires_at - time.time()) > 60:
+        return access_token
+
+    if not refresh_token:
+        axiom_logger.warning("GOOGLE_OAUTH_NO_REFRESH_TOKEN", f"No refresh token available for user {username}")
+        return access_token if access_token else None
+
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        axiom_logger.warning("GOOGLE_OAUTH_NOT_CONFIGURED", "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured on server")
+        return access_token if access_token else None
+
+    try:
+        axiom_logger.info("GOOGLE_TOKEN_REFRESH", f"Refreshing Google OAuth access token for user {username}...")
+        resp = requests.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            new_access_token = data.get("access_token")
+            expires_in = data.get("expires_in", 3600)
+            oauth["access_token"] = new_access_token
+            oauth["expires_at"] = time.time() + expires_in
+            if data.get("refresh_token"):
+                oauth["refresh_token"] = data["refresh_token"]
+            oauth["updated_at"] = datetime.now(timezone.utc).isoformat()
+            profile["google_oauth"] = oauth
+            try:
+                save_user_profile(profile, username=username)
+            except Exception as se:
+                logger.warning(f"Failed to persist refreshed google token: {se}")
+            axiom_logger.info("GOOGLE_TOKEN_REFRESH_SUCCESS", f"Successfully refreshed Google OAuth token for {username}")
+            return new_access_token
+        else:
+            axiom_logger.error("GOOGLE_TOKEN_REFRESH_FAILED", f"Google token refresh failed ({resp.status_code}): {resp.text}")
+    except Exception as e:
+        axiom_logger.error("GOOGLE_TOKEN_REFRESH_ERROR", f"Exception during Google token refresh: {e}", error=str(e))
+
+    return access_token if access_token else None
+
+
+def send_via_gmail_api(
+    access_token: str,
+    sender_email: str,
+    sender_name: str,
+    to_email: str,
+    subject: str,
+    body: str,
+    attachment_path: Optional[Path] = None,
+    attachment_name: str = "Resume.pdf"
+) -> dict:
+    """
+    Sends an email using the official Google Gmail REST API over HTTPS (Port 443).
+    Railway never blocks Port 443. The email appears in the candidate's real Gmail Sent folder.
+    """
+    msg = MIMEMultipart("mixed")
+    from_header = f"{sender_name} <{sender_email}>" if sender_name else sender_email
+    msg["From"] = from_header
+    msg["To"] = to_email
+    msg["Subject"] = subject
+
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(body, "plain", "utf-8"))
+    body_html = body.replace("\n", "<br>")
+    html_markup = f"<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; font-size:14px; line-height:1.6; color:#1a1a1a;'>{body_html}</div>"
+    alt.attach(MIMEText(html_markup, "html", "utf-8"))
+    msg.attach(alt)
+
+    if attachment_path and Path(attachment_path).exists():
+        with open(attachment_path, "rb") as f:
+            part = MIMEApplication(f.read(), Name=attachment_name)
+        part["Content-Disposition"] = f'attachment; filename="{attachment_name}"'
+        msg.attach(part)
+
+    raw_bytes = msg.as_bytes()
+    raw_b64 = base64.urlsafe_b64encode(raw_bytes).decode("utf-8")
+
+    send_url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(send_url, headers=headers, json={"raw": raw_b64}, timeout=30)
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Gmail API delivery failed (HTTP {resp.status_code}): {resp.text}")
+    return resp.json()
+
+
 def send_via_resend(api_key: str, sender: str, sender_name: str, to_email: str, subject: str, body: str, attachment_path: Optional[Path] = None, attachment_name: str = "Resume.pdf", from_email: Optional[str] = None) -> dict:
     """
     Sends email via official Resend Python SDK (Port 443 — 100% allowed on all cloud platforms including Railway).
@@ -1538,8 +1833,12 @@ def send_email():
     resend_key = (profile.get("resend_api_key") or os.getenv("RESEND_API_KEY") or "").strip()
     resend_from = (profile.get("resend_from_email") or os.getenv("RESEND_FROM_EMAIL") or "").strip()
 
-    if not resend_key and (not sender or not password):
-        return jsonify({"error": "Gmail credentials or Resend API key not set in Settings"}), 400
+    oauth_data = profile.get("google_oauth") or {}
+    has_oauth = bool(oauth_data.get("connected") and (oauth_data.get("refresh_token") or oauth_data.get("access_token")))
+    oauth_email = oauth_data.get("email") or sender
+
+    if not has_oauth and not resend_key and (not sender or not password):
+        return jsonify({"error": "Please connect your Gmail in Settings (1-Click Google Connect) or configure email credentials."}), 400
     if not to_email:
         return jsonify({"error": "No recipient email"}), 400
 
@@ -1556,7 +1855,7 @@ def send_email():
         with axiom_logger.step("SEND_EMAIL", description=f"Sending email to {to_email}", recipient=to_email, username=u) as step_meta:
             msg = MIMEMultipart()
             msg["Subject"] = subject
-            msg["From"]    = sender
+            msg["From"]    = oauth_email or sender
             msg["To"]      = to_email
             msg.attach(MIMEText(body, "plain"))
 
@@ -1611,10 +1910,52 @@ def send_email():
                             attached_resume = True
                             break
 
-            # Send via Resend HTTPS API if available, or direct Gmail IPv4 SMTP
+            # Delivery Priority:
+            # 1. Official Gmail REST API over HTTPS (Port 443 — 1-Click OAuth, zero domain setup, 500 emails/day)
+            # 2. Resend HTTPS API (Port 443)
+            # 3. Direct Gmail IPv4 SMTP (fallback for local development)
+            sent_via_gmail_api_ok = False
+            if has_oauth:
+                try:
+                    token = get_valid_google_access_token(profile, username=u)
+                    if token:
+                        sender_disp = (profile.get("name") or "Applicant").strip()
+                        send_from_addr = oauth_email or sender
+                        axiom_logger.info(
+                            "GMAIL_API_ATTEMPT",
+                            f"Sending cold email via official Gmail REST API (Port 443) to {to_email}...",
+                            recipient=to_email
+                        )
+                        gmail_resp = send_via_gmail_api(
+                            access_token=token,
+                            sender_email=send_from_addr,
+                            sender_name=sender_disp,
+                            to_email=to_email,
+                            subject=subject,
+                            body=body,
+                            attachment_path=resume_path_to_send,
+                            attachment_name=resume_name_to_send
+                        )
+                        sent_via_gmail_api_ok = True
+                        axiom_logger.info(
+                            "GMAIL_API_SUCCESS",
+                            f"Email delivered via official Gmail REST API to {to_email} (Msg ID: {gmail_resp.get('id')})",
+                            recipient=to_email,
+                            message_id=gmail_resp.get("id")
+                        )
+                except Exception as g_err:
+                    axiom_logger.error(
+                        "GMAIL_API_FAILED",
+                        f"Gmail API delivery failed: {g_err}. Checking fallback options...",
+                        recipient=to_email,
+                        error=str(g_err)
+                    )
+                    if not resend_key and (not sender or not password):
+                        raise RuntimeError(f"Gmail API delivery failed: {g_err}") from g_err
+
             resend_quota = None
             sent_via_resend_ok = False
-            if resend_key:
+            if not sent_via_gmail_api_ok and resend_key:
                 try:
                     axiom_logger.info("RESEND_ATTEMPT", f"Sending cold email via Resend HTTPS API to {to_email}...", recipient=to_email)
                     resend_resp = send_via_resend(
@@ -1658,11 +1999,12 @@ def send_email():
                     else:
                         raise resend_err
 
-            if not resend_key and not sent_via_resend_ok:
+            if not sent_via_gmail_api_ok and not resend_key and not sent_via_resend_ok:
                 send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
 
             step_meta["attached_resume"] = attached_resume
             step_meta["subject"] = subject
+
 
             # Permanently record applied email in user's sent collection (strictly NO CONTEXT, limit 200)
             to_name = resolve_contact_name(data.get("to_name"), clean_to)

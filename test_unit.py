@@ -549,6 +549,123 @@ class TestZeroDataLeakage(unittest.TestCase):
                     sent_msg_str = args[3]
                     self.assertIn("my_uploaded_resume.pdf", sent_msg_str)
 
+    def test_google_auth_login_redirect(self):
+        """GET /api/auth/google/login redirects to accounts.google.com with proper OAuth parameters."""
+        from unittest.mock import patch
+        from server import app
+        client = app.test_client()
+
+        with patch("server.get_current_username", return_value="oauth_tester_user"):
+            resp = client.get("/api/auth/google/login")
+            self.assertEqual(resp.status_code, 302)
+            location = resp.headers.get("Location", "")
+            self.assertIn("accounts.google.com/o/oauth2/v2/auth", location)
+            self.assertIn("client_id=", location)
+            self.assertIn("scope=", location)
+            self.assertIn("gmail.send", location)
+            self.assertIn("oauth_tester_user", location)
+
+    def test_google_auth_callback_and_status(self):
+        """GET /api/auth/google/callback exchanges code for tokens, saves in profile, and updates status."""
+        from unittest.mock import patch, MagicMock
+        import db
+        import server
+        from server import app
+        client = app.test_client()
+
+        db.clear_user_data("oauth_callback_user")
+
+        # Mock token exchange response
+        mock_token_resp = MagicMock()
+        mock_token_resp.status_code = 200
+        mock_token_resp.json.return_value = {
+            "access_token": "mock_ya29_access_token",
+            "refresh_token": "mock_1//refresh_token",
+            "expires_in": 3600
+        }
+
+        # Mock userinfo response
+        mock_info_resp = MagicMock()
+        mock_info_resp.status_code = 200
+        mock_info_resp.json.return_value = {
+            "email": "candidate.tester@gmail.com"
+        }
+
+        def mock_requests_post(url, **kwargs):
+            if "oauth2.googleapis.com/token" in url:
+                return mock_token_resp
+            return MagicMock(status_code=404)
+
+        def mock_requests_get(url, **kwargs):
+            if "googleapis.com/oauth2/v2/userinfo" in url:
+                return mock_info_resp
+            return MagicMock(status_code=404)
+
+        with patch("requests.post", side_effect=mock_requests_post), \
+             patch("requests.get", side_effect=mock_requests_get):
+            
+            resp = client.get("/api/auth/google/callback?code=mock_auth_code&state=oauth_callback_user")
+            self.assertEqual(resp.status_code, 302)
+            self.assertIn("gmail_connected=1", resp.headers.get("Location", ""))
+
+            # Verify profile has google_oauth credentials
+            prof = server.load_profile(username="oauth_callback_user")
+            self.assertTrue(prof.get("google_oauth", {}).get("connected"))
+            self.assertEqual(prof.get("google_oauth", {}).get("email"), "candidate.tester@gmail.com")
+            self.assertEqual(prof.get("google_oauth", {}).get("access_token"), "mock_ya29_access_token")
+
+            # Verify /api/auth/google/status returns connected: True
+            with patch("server.get_current_username", return_value="oauth_callback_user"):
+                status_resp = client.get("/api/auth/google/status")
+                self.assertEqual(status_resp.status_code, 200)
+                status_json = status_resp.get_json()
+                self.assertTrue(status_json.get("connected"))
+                self.assertEqual(status_json.get("email"), "candidate.tester@gmail.com")
+
+                # Verify disconnect clears status
+                disc_resp = client.post("/api/auth/google/disconnect")
+                self.assertEqual(disc_resp.status_code, 200)
+                status_after = client.get("/api/auth/google/status").get_json()
+                self.assertFalse(status_after.get("connected"))
+
+    def test_send_email_via_gmail_api(self):
+        """POST /api/send uses send_via_gmail_api when Google OAuth is connected."""
+        import db
+        import server
+        from unittest.mock import patch, MagicMock
+        from server import app
+        client = app.test_client()
+
+        db.clear_user_data("oauth_sender_user")
+        user_prof = {
+            "name": "OAuth Candidate",
+            "google_oauth": {
+                "connected": True,
+                "email": "oauth.sender@gmail.com",
+                "access_token": "mock_active_access_token",
+                "refresh_token": "mock_refresh_token",
+                "expires_at": 9999999999.0
+            }
+        }
+        server.save_user_profile(user_prof, username="oauth_sender_user")
+
+        with patch("server.get_current_username", return_value="oauth_sender_user"):
+            with patch("server.send_via_gmail_api", return_value={"id": "mock_gmail_msg_123"}) as mock_gmail_send:
+                resp = client.post("/api/send", json={
+                    "to_email": "recruiter_gmail_api@example.com",
+                    "subject": "Application via Gmail API",
+                    "body": "Hello, please find my application attached."
+                })
+                self.assertEqual(resp.status_code, 200)
+                self.assertTrue(mock_gmail_send.called)
+                args, kwargs = mock_gmail_send.call_args
+                self.assertEqual(kwargs.get("to_email"), "recruiter_gmail_api@example.com")
+                self.assertEqual(kwargs.get("sender_email"), "oauth.sender@gmail.com")
+                self.assertEqual(kwargs.get("access_token"), "mock_active_access_token")
+
+                # Verify email was permanently recorded as applied
+                self.assertTrue(db.is_email_applied("recruiter_gmail_api@example.com", username="oauth_sender_user"))
+
 
 if __name__ == "__main__":
     unittest.main()
