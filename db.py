@@ -157,6 +157,13 @@ def _init_pg_schema(conn):
                 CONSTRAINT unique_user_applied_email UNIQUE (username, email)
             );
             CREATE INDEX IF NOT EXISTS idx_applied_user ON applied_emails(username);
+            CREATE TABLE IF NOT EXISTS user_resumes (
+                username VARCHAR(255) PRIMARY KEY,
+                filename VARCHAR(255) NOT NULL,
+                content_type VARCHAR(100) DEFAULT 'application/pdf',
+                data BYTEA NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
             """)
         logger.info("PostgreSQL: Tables and indexes verified successfully.")
     except Exception as e:
@@ -250,6 +257,123 @@ def load_user_profile_db(username: str) -> Optional[dict]:
         return _load_local_json(p_file, None)
 
     return None
+
+
+def save_user_resume_file(username: str, filename: str, file_bytes: bytes, content_type: str = "application/pdf") -> bool:
+    """
+    Persists uploaded resume binary data into PostgreSQL (BYTEA) or MongoDB,
+    and local file backup. Ensures uploaded resumes survive container redeploys.
+    """
+    u = sanitize_username(username)
+    saved_somewhere = False
+
+    # 1. PostgreSQL
+    pg = get_pg_conn()
+    if pg is not None:
+        try:
+            import psycopg2
+            with pg.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO user_resumes (username, filename, content_type, data, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (username)
+                    DO UPDATE SET filename = EXCLUDED.filename, content_type = EXCLUDED.content_type, data = EXCLUDED.data, updated_at = CURRENT_TIMESTAMP;
+                """, (u, filename, content_type, psycopg2.Binary(file_bytes)))
+            logger.info(f"PostgreSQL: Saved resume file '{filename}' ({len(file_bytes)} bytes) for user '{u}'.")
+            saved_somewhere = True
+        except Exception as e:
+            logger.error(f"PostgreSQL error saving resume for '{u}': {e}")
+
+    # 2. MongoDB
+    mdb = get_mongo_db()
+    if mdb is not None:
+        try:
+            import bson
+            mdb["user_resumes"].update_one(
+                {"username": u},
+                {"$set": {
+                    "username": u,
+                    "filename": filename,
+                    "content_type": content_type,
+                    "data": bson.Binary(file_bytes),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            )
+            logger.info(f"MongoDB: Saved resume file '{filename}' for user '{u}'.")
+            saved_somewhere = True
+        except Exception as e:
+            logger.error(f"MongoDB error saving resume for '{u}': {e}")
+
+    # 3. Local file backup
+    try:
+        user_res_dir = OUTPUT_DIR / "resumes"
+        user_res_dir.mkdir(exist_ok=True)
+        (user_res_dir / f"{u}_{filename}").write_bytes(file_bytes)
+        (user_res_dir / filename).write_bytes(file_bytes)
+        saved_somewhere = True
+    except Exception as e:
+        logger.warning(f"Failed to write local resume backup for '{u}': {e}")
+
+    return saved_somewhere
+
+
+def get_user_resume_file(username: str) -> Optional[dict]:
+    """
+    Retrieves user's uploaded resume from PostgreSQL, MongoDB, or local disk backup.
+    Returns dict with keys: 'filename', 'content_type', 'data' (bytes).
+    """
+    u = sanitize_username(username)
+
+    # 1. Check PostgreSQL
+    pg = get_pg_conn()
+    if pg is not None:
+        try:
+            with pg.cursor() as cur:
+                cur.execute("SELECT filename, content_type, data FROM user_resumes WHERE username = %s LIMIT 1;", (u,))
+                row = cur.fetchone()
+                if row and row[2]:
+                    data_bytes = bytes(row[2])
+                    return {
+                        "filename": row[0],
+                        "content_type": row[1] or "application/pdf",
+                        "data": data_bytes
+                    }
+        except Exception as e:
+            logger.error(f"PostgreSQL error fetching resume for '{u}': {e}")
+
+    # 2. Check MongoDB
+    mdb = get_mongo_db()
+    if mdb is not None:
+        try:
+            doc = mdb["user_resumes"].find_one({"username": u})
+            if doc and "data" in doc:
+                return {
+                    "filename": doc.get("filename", "Resume.pdf"),
+                    "content_type": doc.get("content_type", "application/pdf"),
+                    "data": bytes(doc["data"])
+                }
+        except Exception as e:
+            logger.error(f"MongoDB error fetching resume for '{u}': {e}")
+
+    # 3. Check local file backup
+    try:
+        user_res_dir = OUTPUT_DIR / "resumes"
+        prefix = f"{u}_"
+        for p in user_res_dir.glob(f"{prefix}*"):
+            if p.is_file():
+                fn = p.name[len(prefix):]
+                content_type = "application/pdf" if fn.lower().endswith(".pdf") else "application/octet-stream"
+                return {
+                    "filename": fn,
+                    "content_type": content_type,
+                    "data": p.read_bytes()
+                }
+    except Exception:
+        pass
+
+    return None
+
 
 
 def sanitize_username(username: Optional[str]) -> str:

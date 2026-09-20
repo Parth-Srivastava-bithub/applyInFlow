@@ -26,7 +26,7 @@ from typing import Optional, List, Dict, Any, Set
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from playwright.async_api import async_playwright
 from werkzeug.utils import secure_filename
 
@@ -52,6 +52,7 @@ import db
 from axiom_logger import get_logger
 
 axiom_logger = get_logger(service="backend_server")
+logger = logging.getLogger("autoapply.server")
 
 app = Flask(__name__, static_folder="dashboard", static_url_path="")
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
@@ -1169,17 +1170,31 @@ def upload_resume():
         return jsonify({"error": "Empty filename"}), 400
 
     filename = secure_filename(file.filename)
-    save_path = RESUME_DIR / filename
-    file.save(str(save_path))
+    file_bytes = file.read()
+    if not file_bytes:
+        return jsonify({"error": "Uploaded file is empty"}), 400
+
+    content_type = file.content_type or ("application/pdf" if filename.lower().endswith(".pdf") else "application/octet-stream")
+
+    # Persist resume binary file in PostgreSQL / MongoDB & disk backup
+    db.save_user_resume_file(u, filename, file_bytes, content_type=content_type)
+
+    save_path = RESUME_DIR / f"{u}_{filename}"
+    save_path.write_bytes(file_bytes)
+    (RESUME_DIR / filename).write_bytes(file_bytes)
 
     structured_data = None
     try:
         raw_text = extract_text_from_file(save_path)
         parsed_profile = structure_resume_with_ai(raw_text)
         structured_data = parsed_profile.model_dump()
-        save_json(STRUCTURED_RESUME_FILE, structured_data)
 
-        # Sync profile settings
+        user_struct_file = OUTPUT_DIR / f"structured_resume_{u}.json"
+        save_json(user_struct_file, structured_data)
+        if u in OWNER_ALIASES:
+            save_json(STRUCTURED_RESUME_FILE, structured_data)
+
+        # Sync profile settings and persist to PostgreSQL / MongoDB
         profile = load_profile(username=u)
         profile['resume_filename'] = filename
         if parsed_profile.name:
@@ -1196,16 +1211,13 @@ def upload_resume():
             profile['linkedin'] = parsed_profile.linkedin_url
         if parsed_profile.phone:
             profile['phone'] = parsed_profile.phone
-            
-        save_json(get_user_profile_file(u), profile)
-        if u == "legacy":
-            save_json(PROFILE_FILE, profile)
-    except Exception:
+
+        save_user_profile(profile, username=u)
+    except Exception as e:
+        logger.warning(f"Error parsing resume with AI for {u}: {e}")
         profile = load_profile(username=u)
         profile['resume_filename'] = filename
-        save_json(get_user_profile_file(u), profile)
-        if u == "legacy":
-            save_json(PROFILE_FILE, profile)
+        save_user_profile(profile, username=u)
 
     return jsonify({
         "ok": True,
@@ -1546,29 +1558,53 @@ def send_email():
             tailored_fn = data.get("tailored_resume_filename") or ""
             attached_resume = False
             resume_path_to_send = None
-            resume_name_to_send = "Resume.pdf"
+            user_disp_name = (profile.get("name") or "Applicant").strip().replace(" ", "_")
+            resume_name_to_send = f"{user_disp_name}_Resume.pdf"
 
             if tailored_fn:
                 tailored_path = TAILORED_RESUMES_DIR / secure_filename(tailored_fn)
                 if tailored_path.exists():
                     resume_path_to_send = tailored_path
-                    resume_name_to_send = "Parth_Srivastava_Resume.pdf"
+                    resume_name_to_send = f"{user_disp_name}_Tailored_Resume.pdf"
                     with open(tailored_path, "rb") as f:
-                        part = MIMEApplication(f.read(), Name="Parth_Srivastava_Resume.pdf")
-                    part['Content-Disposition'] = 'attachment; filename="Parth_Srivastava_Resume.pdf"'
+                        part = MIMEApplication(f.read(), Name=resume_name_to_send)
+                    part['Content-Disposition'] = f'attachment; filename="{resume_name_to_send}"'
                     msg.attach(part)
                     attached_resume = True
 
-            if not attached_resume and resume_fn:
-                resume_path = RESUME_DIR / resume_fn
-                if resume_path.exists():
-                    resume_path_to_send = resume_path
-                    resume_name_to_send = resume_fn
-                    with open(resume_path, "rb") as f:
-                        part = MIMEApplication(f.read(), Name=resume_fn)
-                    part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
+            if not attached_resume:
+                # Retrieve user's uploaded resume from PostgreSQL / MongoDB or local disk
+                user_res = db.get_user_resume_file(u)
+                if user_res and user_res.get("data"):
+                    raw_bytes = user_res["data"]
+                    user_resume_fn = user_res.get("filename") or resume_fn or "Resume.pdf"
+                    clean_att_name = user_resume_fn if user_resume_fn.lower().endswith((".pdf", ".docx", ".doc")) else f"{user_resume_fn}.pdf"
+                    resume_name_to_send = clean_att_name
+                    cached_path = RESUME_DIR / f"{u}_{clean_att_name}"
+                    try:
+                        cached_path.write_bytes(raw_bytes)
+                        resume_path_to_send = cached_path
+                    except Exception as ce:
+                        logger.warning(f"Could not write cached resume path: {ce}")
+                    part = MIMEApplication(raw_bytes, Name=clean_att_name)
+                    part['Content-Disposition'] = f'attachment; filename="{clean_att_name}"'
                     msg.attach(part)
                     attached_resume = True
+                elif resume_fn:
+                    candidates = [
+                        RESUME_DIR / f"{u}_{resume_fn}",
+                        RESUME_DIR / resume_fn,
+                    ]
+                    for cand in candidates:
+                        if cand.exists():
+                            resume_path_to_send = cand
+                            resume_name_to_send = resume_fn
+                            with open(cand, "rb") as f:
+                                part = MIMEApplication(f.read(), Name=resume_fn)
+                            part['Content-Disposition'] = f'attachment; filename="{resume_fn}"'
+                            msg.attach(part)
+                            attached_resume = True
+                            break
 
             # Send via Resend HTTPS API if available, or direct Gmail IPv4 SMTP
             resend_quota = None
@@ -1707,22 +1743,99 @@ def get_base_tex():
     })
 
 
+@app.route("/api/resume/user-resume", methods=["GET"])
+def get_current_user_resume():
+    u = get_current_username()
+    if not u:
+        return jsonify({"error": "Sign in required"}), 401
+    user_res = db.get_user_resume_file(u)
+    if user_res and user_res.get("data"):
+        return Response(
+            user_res["data"],
+            mimetype=user_res.get("content_type", "application/pdf"),
+            headers={"Content-Disposition": f"inline; filename={user_res.get('filename', 'Resume.pdf')}"}
+        )
+    profile = load_profile(u)
+    resume_fn = profile.get("resume_filename")
+    if resume_fn:
+        for cand in [RESUME_DIR / f"{u}_{resume_fn}", RESUME_DIR / resume_fn]:
+            if cand.exists():
+                return send_from_directory(cand.parent, cand.name, mimetype="application/pdf")
+    return jsonify({"error": "No resume uploaded"}), 404
+
+
 @app.route("/api/resume/pdf/<path:filename>", methods=["GET"])
 def serve_tailored_pdf(filename):
     clean_fn = secure_filename(filename)
-    target = TAILORED_RESUMES_DIR / clean_fn
-    if not target.exists():
-        if LATEX_SOURCE_FILE.exists():
-            try:
-                pdf_bytes = compile_latex_via_service(LATEX_SOURCE_FILE.read_text(encoding="utf-8"))
-                target.write_bytes(pdf_bytes)
-            except Exception:
-                pass
-    if target.exists():
-        return send_from_directory(TAILORED_RESUMES_DIR, clean_fn, mimetype="application/pdf")
+    u = get_current_username()
+
+    # 1. Existing tailored resume (skip for generic resume_master.pdf so user's uploaded master is served)
+    if clean_fn != "resume_master.pdf":
+        target = TAILORED_RESUMES_DIR / clean_fn
+        if target.exists():
+            return send_from_directory(TAILORED_RESUMES_DIR, clean_fn, mimetype="application/pdf")
+
+    # 2. XeLaTeX compilation if requested specifically
+    if clean_fn.endswith(".pdf") and clean_fn != "resume_master.pdf" and LATEX_SOURCE_FILE.exists():
+        try:
+            pdf_bytes = compile_latex_via_service(LATEX_SOURCE_FILE.read_text(encoding="utf-8"))
+            target.write_bytes(pdf_bytes)
+            return send_from_directory(TAILORED_RESUMES_DIR, clean_fn, mimetype="application/pdf")
+        except Exception:
+            pass
+
+    # 3. User's uploaded resume from PostgreSQL / MongoDB
+    if u:
+        user_res = db.get_user_resume_file(u)
+        if user_res and user_res.get("data"):
+            mimetype = user_res.get("content_type", "application/pdf")
+            if mimetype == "application/pdf":
+                return Response(
+                    user_res["data"],
+                    mimetype="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={user_res.get('filename', 'Resume.pdf')}"}
+                )
+            else:
+                return Response(f"""<!DOCTYPE html>
+<html><body style="background:#0f172a;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
+<div style="background:#1e293b;padding:24px;border-radius:12px;border:1px solid #334155;">
+<div style="font-size:36px;margin-bottom:8px;">📎</div>
+<h3 style="color:#f8fafc;margin:0 0 6px;">Document Ready</h3>
+<p style="font-size:13px;margin:0;">Uploaded: <strong>{user_res.get('filename')}</strong><br>This Word document will be automatically attached to your outreach emails.</p>
+</div></body></html>""", mimetype="text/html", status=200)
+
+        profile = load_profile(u)
+        resume_fn = profile.get("resume_filename")
+        if resume_fn:
+            for cand in [RESUME_DIR / f"{u}_{resume_fn}", RESUME_DIR / resume_fn, RESUME_DIR / clean_fn]:
+                if cand.exists():
+                    return send_from_directory(cand.parent, cand.name, mimetype="application/pdf")
+
+    # 4. Fallback for owner / legacy
     if (RESUME_DIR / "parth_resume.pdf").exists():
         return send_from_directory(RESUME_DIR, "parth_resume.pdf", mimetype="application/pdf")
-    return jsonify({"error": "PDF not found"}), 404
+
+    # 5. Clean styled fallback message for preview iframe instead of raw JSON 404
+    fallback_html = """<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; background: #0f172a; color: #94a3b8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; }
+  .box { max-width: 360px; padding: 24px; border-radius: 12px; background: #1e293b; border: 1px solid #334155; }
+  .icon { font-size: 36px; margin-bottom: 12px; }
+  h3 { color: #f8fafc; margin: 0 0 8px 0; font-size: 16px; }
+  p { font-size: 13px; line-height: 1.5; margin: 0; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="icon">📄</div>
+    <h3>No Resume Uploaded Yet</h3>
+    <p>Upload your PDF or Word resume in <strong>Step 2</strong> of the dashboard to enable live preview and attachments.</p>
+  </div>
+</body>
+</html>"""
+    return Response(fallback_html, mimetype="text/html", status=200)
 
 
 @app.route("/api/resume/tailor", methods=["POST"])

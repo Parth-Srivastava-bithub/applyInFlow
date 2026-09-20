@@ -3773,8 +3773,14 @@
                   <span class="status-badge-pill" style="cursor:pointer;" onclick="openTailorResumeModal(${idx})">
                     ✨ Tailored Resume Attached
                   </span>
+                ` : (profile && profile.resume_filename) ? `
+                  <span style="font-size:12px; color:var(--success-text); font-weight:600; display:flex; align-items:center; gap:4px;">
+                    📎 <span>${esc(profile.resume_filename)} attached</span>
+                  </span>
                 ` : `
-                  <span style="font-size:12px; color:#64748b;">📎 Master resume attached</span>
+                  <span style="font-size:12px; color:#f59e0b; font-weight:600; display:flex; align-items:center; gap:4px; cursor:pointer;" onclick="document.getElementById('resume-file').click()" title="Click to upload resume">
+                    ⚠️ <span>No resume uploaded (click to attach)</span>
+                  </span>
                 `}
                 <button class="btn btn-xs btn-green-soft" onclick="quickTailorDraftSkills(${idx}, this)">
                   ⚡ Quick Sync Skills
@@ -3937,7 +3943,8 @@
         return;
       }
 
-      const masterUrl = `/api/resume/pdf/resume_master.pdf?t=${Date.now()}`;
+      const userResumeFn = (profile && profile.resume_filename) ? profile.resume_filename : 'resume_master.pdf';
+      const masterUrl = `/api/resume/pdf/${encodeURIComponent(userResumeFn)}?t=${Date.now()}`;
       if (iframe) iframe.src = masterUrl;
       document.getElementById('tailor-pdf-link').href = masterUrl;
       apiFetch('/api/resume/base-tex').then(r => r.json()).then(data => {
@@ -4407,14 +4414,23 @@
         return;
       }
       if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
       const formData = new FormData();
-      formData.append('resume', input.files[0]);
-      const res = await apiFetch('/api/upload-resume', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (data.ok) {
-        toast('Resume uploaded!', 'success');
-        document.getElementById('resume-filename').textContent = data.filename;
-        await loadProfile();
+      formData.append('resume', file);
+      toast('Uploading & analyzing resume with AI...', 'info');
+      try {
+        const res = await apiFetch('/api/upload-resume', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.ok) {
+          toast('Resume uploaded and synced to cloud!', 'success');
+          document.getElementById('resume-filename').textContent = data.filename;
+          await loadProfile();
+          renderDrafts();
+        } else {
+          toast(data.error || 'Failed to upload resume', 'error');
+        }
+      } catch (err) {
+        toast('Upload failed: ' + err.message, 'error');
       }
     }
 

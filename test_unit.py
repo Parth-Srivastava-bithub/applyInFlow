@@ -475,7 +475,81 @@ class TestZeroDataLeakage(unittest.TestCase):
         self.assertIsNone(quota_empty["daily_used"])
         self.assertEqual(quota_empty["daily_remaining"], "Unlimited")
 
+    def test_user_resume_persistence_and_retrieval(self):
+        """Resume binary data can be saved and retrieved per user via db functions."""
+        import db
+        fake_pdf = b"%PDF-1.4 Fake PDF Content for Unit Test"
+        db.save_user_resume_file("test_user_res", "test_resume.pdf", fake_pdf, "application/pdf")
+        retrieved = db.get_user_resume_file("test_user_res")
+        self.assertIsNotNone(retrieved)
+        self.assertEqual(retrieved["filename"], "test_resume.pdf")
+        self.assertEqual(retrieved["data"], fake_pdf)
+
+    def test_upload_resume_and_preview_serving(self):
+        """POST /api/upload-resume persists profile and GET /api/resume/pdf serves user resume."""
+        import io
+        from unittest.mock import patch
+        from server import app
+        client = app.test_client()
+        fake_pdf = b"%PDF-1.4 Valid Header and Body"
+        
+        with patch("server.get_current_username", return_value="resume_tester_user"):
+            with patch("server.structure_resume_with_ai") as mock_ai:
+                from resume_parser import StructuredResumeProfile
+                mock_ai.return_value = StructuredResumeProfile(
+                    name="Candidate Tester",
+                    headline_or_role="Software Engineer",
+                    professional_summary="Experienced developer with 3 years background."
+                )
+                
+                # Upload resume
+                resp = client.post("/api/upload-resume", data={
+                    "resume": (io.BytesIO(fake_pdf), "my_custom_resume.pdf")
+                }, content_type="multipart/form-data")
+                self.assertEqual(resp.status_code, 200)
+                
+                # Profile now reflects uploaded resume
+                prof = client.get("/api/profile").get_json()
+                self.assertEqual(prof.get("resume_filename"), "my_custom_resume.pdf")
+
+                # Preview endpoint returns the uploaded resume PDF
+                preview_resp = client.get("/api/resume/pdf/resume_master.pdf")
+                self.assertEqual(preview_resp.status_code, 200)
+                self.assertEqual(preview_resp.data, fake_pdf)
+
+    def test_send_email_attaches_uploaded_resume(self):
+        """POST /api/send attaches the user's uploaded resume from DB when sending via SMTP or Resend."""
+        import db
+        from unittest.mock import patch, MagicMock
+        from server import app
+        client = app.test_client()
+
+        fake_pdf = b"%PDF-1.4 Fake Resume Content for Send Test"
+        db.save_user_resume_file("sender_tester_user", "my_uploaded_resume.pdf", fake_pdf, "application/pdf")
+
+        with patch("server.get_current_username", return_value="sender_tester_user"):
+            with patch("server.load_profile", return_value={
+                "name": "Sender Tester",
+                "gmail_sender": "test@example.com",
+                "gmail_app_password": "testpassword",
+                "resume_filename": "my_uploaded_resume.pdf"
+            }):
+                with patch("server.send_smtp_email") as mock_smtp:
+                    resp = client.post("/api/send", json={
+                        "to_email": "recruiter_test_1@example.com",
+                        "subject": "Application: AI Engineer",
+                        "body": "Resume attached for your review."
+                    })
+                    self.assertEqual(resp.status_code, 200)
+                    self.assertTrue(mock_smtp.called)
+                    # Inspect sent email payload string for attached PDF
+                    args, kwargs = mock_smtp.call_args
+                    # args: (sender, password, to_email, msg_str)
+                    sent_msg_str = args[3]
+                    self.assertIn("my_uploaded_resume.pdf", sent_msg_str)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
