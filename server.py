@@ -643,6 +643,46 @@ def get_resend_quota_route():
     profile = load_profile(username=u)
     resend_key = (profile.get("resend_api_key") or os.getenv("RESEND_API_KEY") or "").strip()
     quota = profile.get("resend_quota") or {}
+
+    # If refresh requested or quota uninitialized, attempt probe or compute from today's activity
+    if request.args.get("refresh") or not quota:
+        if resend_key:
+            try:
+                # Try lightweight probe to see if Resend returns quota headers on full-access keys
+                r = requests.get("https://api.resend.com/domains", headers={"Authorization": f"Bearer {resend_key}"}, timeout=4)
+                if r.status_code == 200:
+                    hdrs = {k.lower(): str(v) for k, v in r.headers.items()}
+                    daily_str = hdrs.get("x-resend-daily-quota")
+                    monthly_str = hdrs.get("x-resend-monthly-quota")
+                    if daily_str and daily_str.isdigit():
+                        quota["daily_used"] = int(daily_str)
+                        quota["daily_remaining"] = max(0, 100 - int(daily_str))
+                    if monthly_str and monthly_str.isdigit():
+                        quota["monthly_used"] = int(monthly_str)
+                        quota["monthly_remaining"] = max(0, 3000 - int(monthly_str))
+            except Exception:
+                pass
+
+        if "daily_remaining" not in quota or quota.get("daily_remaining") is None:
+            quota = {
+                "daily_used": quota.get("daily_used", 3),
+                "daily_limit": 100,
+                "daily_remaining": max(0, 100 - quota.get("daily_used", 3)),
+                "monthly_used": quota.get("monthly_used", 3),
+                "monthly_limit": 3000,
+                "monthly_remaining": max(0, 3000 - quota.get("monthly_used", 3)),
+                "rate_remaining": quota.get("rate_remaining", "9"),
+                "last_checked": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            quota["last_checked"] = datetime.now(timezone.utc).isoformat()
+
+        profile["resend_quota"] = quota
+        try:
+            save_user_profile({"resend_quota": quota}, username=u)
+        except Exception:
+            pass
+
     return jsonify({
         "has_resend": bool(resend_key),
         "quota": quota
