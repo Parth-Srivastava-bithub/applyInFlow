@@ -217,6 +217,11 @@ def get_current_username() -> Optional[str]:
         u = db.sanitize_username(header_u)
         check_and_migrate_legacy_for_owner(u)
         return u
+    cookie_u = request.cookies.get("autoapply_user")
+    if cookie_u and cookie_u.strip() and cookie_u.strip().lower() not in forbidden:
+        u = db.sanitize_username(cookie_u)
+        check_and_migrate_legacy_for_owner(u)
+        return u
     param_u = request.args.get("username")
     if param_u and param_u.strip() and param_u.strip().lower() not in forbidden:
         u = db.sanitize_username(param_u)
@@ -1645,7 +1650,11 @@ def send_email():
                             recipient=to_email,
                             error=str(resend_err)
                         )
-                        send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
+                        try:
+                            send_smtp_email(sender, password, to_email, msg.as_string(), timeout=15)
+                        except Exception as smtp_err:
+                            err_msg = f"{resend_err} (SMTP fallback on ports 465 & 587 also failed: {smtp_err})"
+                            raise RuntimeError(err_msg) from smtp_err
                     else:
                         raise resend_err
 
@@ -1775,7 +1784,27 @@ def serve_tailored_pdf(filename):
         if target.exists():
             return send_from_directory(TAILORED_RESUMES_DIR, clean_fn, mimetype="application/pdf")
 
-    # 2. XeLaTeX compilation if requested specifically
+    # 2. Check directly by filename in DB (PostgreSQL / MongoDB) or disk
+    if clean_fn != "resume_master.pdf":
+        by_fn = db.get_resume_by_filename(clean_fn)
+        if by_fn and by_fn.get("data"):
+            mimetype = by_fn.get("content_type", "application/pdf")
+            if mimetype == "application/pdf":
+                return Response(
+                    by_fn["data"],
+                    mimetype="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={by_fn.get('filename', 'Resume.pdf')}"}
+                )
+            else:
+                return Response(f"""<!DOCTYPE html>
+<html><body style="background:#0f172a;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
+<div style="background:#1e293b;padding:24px;border-radius:12px;border:1px solid #334155;">
+<div style="font-size:36px;margin-bottom:8px;">📎</div>
+<h3 style="color:#f8fafc;margin:0 0 6px;">Document Ready</h3>
+<p style="font-size:13px;margin:0;">Uploaded: <strong>{by_fn.get('filename')}</strong><br>This Word document will be automatically attached to your outreach emails.</p>
+</div></body></html>""", mimetype="text/html", status=200)
+
+    # 3. XeLaTeX compilation if requested specifically
     if clean_fn.endswith(".pdf") and clean_fn != "resume_master.pdf" and LATEX_SOURCE_FILE.exists():
         try:
             pdf_bytes = compile_latex_via_service(LATEX_SOURCE_FILE.read_text(encoding="utf-8"))
@@ -1784,7 +1813,7 @@ def serve_tailored_pdf(filename):
         except Exception:
             pass
 
-    # 3. User's uploaded resume from PostgreSQL / MongoDB
+    # 4. User's uploaded resume from PostgreSQL / MongoDB
     if u:
         user_res = db.get_user_resume_file(u)
         if user_res and user_res.get("data"):
@@ -1811,7 +1840,7 @@ def serve_tailored_pdf(filename):
                 if cand.exists():
                     return send_from_directory(cand.parent, cand.name, mimetype="application/pdf")
 
-    # 4. Fallback for owner / legacy
+    # 5. Fallback for owner / legacy
     if (RESUME_DIR / "parth_resume.pdf").exists():
         return send_from_directory(RESUME_DIR, "parth_resume.pdf", mimetype="application/pdf")
 

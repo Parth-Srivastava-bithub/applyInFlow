@@ -2834,6 +2834,9 @@
       const isAlreadyActive = (currentUsername === username);
       currentUsername = username;
       localStorage.setItem('autoapply_user', currentUsername);
+      try {
+        document.cookie = 'autoapply_user=' + encodeURIComponent(currentUsername) + '; path=/; max-age=31536000; SameSite=Lax';
+      } catch (ce) {}
 
       const signinBtn = document.getElementById('clerk-signin-btn');
       const authGate = document.getElementById('clerk-auth-gate');
@@ -2873,6 +2876,9 @@
     function signOutUser() {
       currentUsername = null;
       localStorage.removeItem('autoapply_user');
+      try {
+        document.cookie = 'autoapply_user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+      } catch (ce) {}
       contacts = [];
       sentEmails = [];
       drafts = [];
@@ -3933,10 +3939,11 @@
         };
       }
 
+      const userParam = currentUsername ? `&username=${encodeURIComponent(currentUsername)}` : '';
       if (d.tailored_resume_filename) {
         currentTailoredFilename = d.tailored_resume_filename;
         currentTailoredTex = d.tailored_tex || '';
-        const pdfUrl = `/api/resume/pdf/${d.tailored_resume_filename}?t=${Date.now()}`;
+        const pdfUrl = `/api/resume/pdf/${encodeURIComponent(d.tailored_resume_filename)}?t=${Date.now()}${userParam}`;
         if (iframe) iframe.src = pdfUrl;
         document.getElementById('tailor-pdf-link').href = pdfUrl;
         document.getElementById('tailor-raw-tex').value = currentTailoredTex;
@@ -3944,7 +3951,7 @@
       }
 
       const userResumeFn = (profile && profile.resume_filename) ? profile.resume_filename : 'resume_master.pdf';
-      const masterUrl = `/api/resume/pdf/${encodeURIComponent(userResumeFn)}?t=${Date.now()}`;
+      const masterUrl = `/api/resume/pdf/${encodeURIComponent(userResumeFn)}?t=${Date.now()}${userParam}`;
       if (iframe) iframe.src = masterUrl;
       document.getElementById('tailor-pdf-link').href = masterUrl;
       apiFetch('/api/resume/base-tex').then(r => r.json()).then(data => {

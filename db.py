@@ -375,6 +375,71 @@ def get_user_resume_file(username: str) -> Optional[dict]:
     return None
 
 
+def get_resume_by_filename(filename: str) -> Optional[dict]:
+    """
+    Looks up an uploaded resume across PostgreSQL, MongoDB, or local disk by filename.
+    Used to reliably serve preview PDFs in iframes even if session context isn't attached.
+    """
+    clean_fn = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename).strip()
+    if not clean_fn:
+        return None
+
+    # 1. PostgreSQL
+    pg = get_pg_conn()
+    if pg is not None:
+        try:
+            with pg.cursor() as cur:
+                cur.execute("SELECT filename, content_type, data FROM user_resumes WHERE filename = %s ORDER BY updated_at DESC LIMIT 1;", (clean_fn,))
+                row = cur.fetchone()
+                if row and row[2]:
+                    return {
+                        "filename": row[0],
+                        "content_type": row[1] or "application/pdf",
+                        "data": bytes(row[2])
+                    }
+        except Exception as e:
+            logger.error(f"PostgreSQL error fetching resume by filename '{clean_fn}': {e}")
+
+    # 2. MongoDB
+    mdb = get_mongo_db()
+    if mdb is not None:
+        try:
+            doc = mdb["user_resumes"].find_one({"filename": clean_fn})
+            if doc and "data" in doc:
+                return {
+                    "filename": doc.get("filename", clean_fn),
+                    "content_type": doc.get("content_type", "application/pdf"),
+                    "data": bytes(doc["data"])
+                }
+        except Exception as e:
+            logger.error(f"MongoDB error fetching resume by filename '{clean_fn}': {e}")
+
+    # 3. Local disk search
+    try:
+        user_res_dir = OUTPUT_DIR / "resumes"
+        # Check direct match
+        exact_p = user_res_dir / clean_fn
+        if exact_p.exists() and exact_p.is_file():
+            return {
+                "filename": clean_fn,
+                "content_type": "application/pdf" if clean_fn.lower().endswith(".pdf") else "application/octet-stream",
+                "data": exact_p.read_bytes()
+            }
+        # Check suffix match (e.g. {username}_{clean_fn})
+        for p in user_res_dir.glob(f"*_{clean_fn}"):
+            if p.is_file():
+                return {
+                    "filename": clean_fn,
+                    "content_type": "application/pdf" if clean_fn.lower().endswith(".pdf") else "application/octet-stream",
+                    "data": p.read_bytes()
+                }
+    except Exception:
+        pass
+
+    return None
+
+
+
 
 def sanitize_username(username: Optional[str]) -> str:
     """

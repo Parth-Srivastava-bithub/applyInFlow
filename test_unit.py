@@ -525,6 +525,7 @@ class TestZeroDataLeakage(unittest.TestCase):
         client = app.test_client()
 
         fake_pdf = b"%PDF-1.4 Fake Resume Content for Send Test"
+        db.clear_user_data("sender_tester_user")
         db.save_user_resume_file("sender_tester_user", "my_uploaded_resume.pdf", fake_pdf, "application/pdf")
 
         with patch("server.get_current_username", return_value="sender_tester_user"):
