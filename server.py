@@ -1219,6 +1219,7 @@ def generate_email():
     u = get_current_username()
     if not u:
         return jsonify({"error": "Sign in required"}), 401
+    is_owner = u in OWNER_ALIASES
     data = request.json or {}
     hr_name_raw = clean_name(data.get("name", "Hiring Manager"))
     hr_title    = data.get("title", "")
@@ -1232,28 +1233,29 @@ def generate_email():
     hr_name = resolve_contact_name(extracted_owner or hr_name_raw, hr_email)
     relevant_post = extract_post_for_email(post_text, hr_email)
 
-    structured_resume = load_json(STRUCTURED_RESUME_FILE, None)
+    cand_default_name = "Parth Srivastava" if is_owner else "Applicant"
+    structured_resume = load_json(STRUCTURED_RESUME_FILE, None) if is_owner else None
     if structured_resume:
         try:
             parsed_model = StructuredResumeProfile.model_validate(structured_resume)
             candidate_context = format_candidate_context_for_prompt(parsed_model)
-            cand_name = parsed_model.name or profile.get("name") or "Parth Srivastava"
+            cand_name = parsed_model.name or profile.get("name") or cand_default_name
         except Exception:
-            cand_name = profile.get("name") or "Parth Srivastava"
+            cand_name = profile.get("name") or cand_default_name
             candidate_context = f"""Candidate Profile:
 - Name: {cand_name}
-- Role: {profile['role']}
-- Experience: {profile['experience']}
-- Skills: {profile['skills']}
-- Location: {profile['location']}"""
+- Role: {profile.get('role', '')}
+- Experience: {profile.get('experience', '')}
+- Skills: {profile.get('skills', '')}
+- Location: {profile.get('location', '')}"""
     else:
-        cand_name = profile.get("name") or "Parth Srivastava"
+        cand_name = profile.get("name") or cand_default_name
         candidate_context = f"""Candidate Profile:
 - Name: {cand_name}
-- Role: {profile['role']}
-- Experience: {profile['experience']}
-- Skills: {profile['skills']}
-- Location: {profile['location']}"""
+- Role: {profile.get('role', '')}
+- Experience: {profile.get('experience', '')}
+- Skills: {profile.get('skills', '')}
+- Location: {profile.get('location', '')}"""
 
     try:
         with axiom_logger.step("GENERATE_EMAIL", description=f"Generating email for {hr_email}", email=hr_email, model=req_model, username=u) as step_meta:

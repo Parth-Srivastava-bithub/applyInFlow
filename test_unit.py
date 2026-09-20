@@ -401,6 +401,24 @@ class TestZeroDataLeakage(unittest.TestCase):
         non_owner = load_profile("recruiter_guest_user_123")
         self.assertEqual(non_owner.get("portfolio_url", ""), "")
 
+    def test_generate_email_route_with_guest(self):
+        """POST /api/generate does not crash with NameError and correctly uses guest profile."""
+        from unittest.mock import patch
+        from server import app
+        client = app.test_client()
+        with patch("server.get_current_username", return_value="yellowforesty"):
+            with patch("pipeline.email_drafter.draft_email", return_value={"subject": "Test", "body": "Body", "raw": "Raw"}):
+                resp = client.post("/api/generate", json={
+                    "name": "Neetika",
+                    "title": "Technical Recruiter",
+                    "post_text": "We are hiring an AI Engineer. Reach out at neetika.codes@gmail.com",
+                    "hr_email": "neetika.codes@gmail.com"
+                })
+                self.assertEqual(resp.status_code, 200)
+                data = resp.get_json()
+                self.assertIn("subject", data)
+                self.assertIn("body", data)
+
     def test_resend_sdk_import_and_signature(self):
         """Resend SDK is correctly installed and send_via_resend is callable."""
         import resend
